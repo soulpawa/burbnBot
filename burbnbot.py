@@ -1,5 +1,6 @@
 from BurbnBot.BurbnBot import BurbnBot
-
+breakpoint()
 burbn = BurbnBot(configfile="config/credentials.json")
 
-breakpoint()
+
+burbn.do_hashtag(hashtag="#chicagomodel")
