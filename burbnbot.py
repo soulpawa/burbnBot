@@ -1,6 +1,10 @@
+import time
+
 from BurbnBot.BurbnBot import BurbnBot
-breakpoint()
+
 burbn = BurbnBot(configfile="config/credentials.json")
 
 
-burbn.do_hashtag(hashtag="#chicagomodel")
+burbn.test()
+
+burbn.scrool_down()
