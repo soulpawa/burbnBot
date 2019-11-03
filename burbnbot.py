@@ -4,7 +4,8 @@ from BurbnBot.BurbnBot import BurbnBot
 
 burbn = BurbnBot(configfile="config/credentials.json")
 
+burbn.test(profile="melanin.gram")
 
-burbn.test()
+breakpoint()
 
-burbn.scrool_down()
+burbn.get_info_post()

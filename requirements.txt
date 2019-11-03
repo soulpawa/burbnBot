@@ -1,1 +1,2 @@
+pyperclip
 Appium-Python-Client
