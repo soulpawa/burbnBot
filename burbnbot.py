@@ -4,10 +4,8 @@ from BurbnBot.BurbnBot import BurbnBot
 
 burbn = BurbnBot(configfile="config/credentials.json")
 
-burbn.test(profile="black.h.i.v.e")
+breakpoint()
 
 burbn.check_post()
 
-breakpoint()
-
-burbn.get_info_post()
+# burbn.hashtag_interact(hashtag="chicagomodel", top=True, recent=True)

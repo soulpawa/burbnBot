@@ -3,6 +3,7 @@
 # Then you can paste this into a file and simply run with Python
 import argparse
 import json
+import os
 import random
 import re
 import shlex
@@ -16,19 +17,16 @@ from time import sleep
 from appium import webdriver
 from appium.webdriver.appium_service import AppiumService
 from appium.webdriver.common.touch_action import TouchAction
-from selenium.webdriver.common.by import By
 
+# from .elements_compile import element
+# from selenium.webdriver.common.by import By
+from selenium.common.exceptions import NoSuchElementException
 
+from BurbnBot.Predict import Predict
 
 
 class BurbnBot:
     def __init__(self, configfile: str = None):
-        caps = {
-            "platformName": "Android",
-            "deviceName": "Dev",
-            'automationName': 'UiAutomator2'
-        }
-
         parser = argparse.ArgumentParser(add_help=True)
         parser.add_argument('-settings', type=str, help="json settings file")
         args = parser.parse_args()
@@ -36,7 +34,8 @@ class BurbnBot:
         settings = json.load(open(args.settings))
         self.username = settings['instagram']['username']
         self.logPath = "log/"
-        self.appiumservice = AppiumService()
+
+        self.predict = Predict(api_key=settings['clarifai']['api_key'])
 
         logging.basicConfig(
             level=logging.INFO,
@@ -52,16 +51,25 @@ class BurbnBot:
             self.logging.info("Lets do it!.")
 
             self.logging.info('Starting emulator...')
-            # subprocess.Popen(shlex.split(settings['commands']['emulator']))
-            # sleep(15)
+            subprocess.Popen(shlex.split(settings['commands']['emulator']))
 
-            # self.appiumservice.start()
+            os.environ.setdefault(key="ANDROID_HOME", value=settings['commands']['android_home'])
 
-            self.driver = webdriver.Remote(desired_capabilities=caps, command_executor="http://127.0.0.1:4723/wd/hub")
-            self.logging.info("Connected with Appium Server.")
+            self.appiumservice = AppiumService()
 
-            self.driver.start_session(caps)
-            self.logging.info(msg="Appium session started ID: {}".format(self.driver.session_id))
+            self.appiumservice.start()
+
+            if self.appiumservice.is_running:
+                caps = {
+                    "platformName": "Android",
+                    "deviceName": "Dev",
+                    'automationName': 'UiAutomator2'
+                }
+                self.logging.info("Appium Server is running.")
+                self.driver = webdriver.Remote(desired_capabilities=caps, command_executor="http://0.0.0.0:4723/wd/hub")
+                self.logging.info("Connected with Appium Server.")
+                # self.driver.start_session(caps)
+                # self.logging.info(msg="Appium session started ID: {}".format(self.driver.session_id))
         except Exception as err:
             self.do_exception(err)
             self.end()
@@ -72,117 +80,94 @@ class BurbnBot:
             self.driver.terminate_app('com.instagram.android')
             self.driver.find_element_by_accessibility_id("Instagram").click()
             self.logging.info("Instagram starting.")
-            self.driver.implicitly_wait(time_to_wait=15)
 
-    def test(self, profile):
+    def hashtag_interact(self, hashtag: str = None, top: bool = False, recent: bool = False):
         try:
-            self.driver.find_element_by_xpath(
-                xpath='//android.widget.FrameLayout[@content-desc="Search and Explore"]').click()
-            self.driver.find_element_by_id("com.instagram.android:id/action_bar_search_edit_text").click()
-            self.driver.find_element_by_id("com.instagram.android:id/action_bar_search_edit_text").send_keys(profile)
+            if self.search_hashtag(hashtag):
+                if top:
+                    self.driver.find_element_by_xpath(xpath='//android.widget.TextView[@content-desc="Top"]').click()
+                if recent:
+                    self.driver.find_element_by_xpath(xpath='//android.widget.TextView[@content-desc="Recent"]').click()
 
-            self.driver.find_element_by_id("com.instagram.android:id/row_search_user_username").click()
-
-            profile_viewpager = self.driver.find_element_by_class_name(name="androidx.recyclerview.widget.RecyclerView")
-            breakpoint()
-            list_posts = profile_viewpager.find_elements_by_class_name(name="android.widget.ImageView")
-
-            list_posts[1]
+                header_list = self.driver.find_element_by_id("com.instagram.android:id/sticky_header_list")
+                list_posts = header_list.find_element_by_id("android:id/list").find_elements_by_class_name(
+                    "android.widget.ImageView")
+                list_posts[0].click()
+                self.check_post()
+                breakpoint()
+            else:
+                self.logging.info("No results found for {}.".format(hashtag))
 
         except Exception as err:
             self.do_exception(err)
             pass
 
+    def check_post(self):
+        row_feed_photo_profile_name = self.driver.find_element_by_id(
+            "com.instagram.android:id/row_feed_photo_profile_name")
+        owner_username = row_feed_photo_profile_name.text.replace(" •", "")
+
+        TouchAction(self.driver).press(x=row_feed_photo_profile_name.rect["x"],
+                                       y=row_feed_photo_profile_name.rect["y"]).move_to(
+            x=row_feed_photo_profile_name.rect["width"], y=10).release().perform()
+
+        has_liked = self.driver.find_element_by_id("com.instagram.android:id/row_feed_button_like").tag_name == "Liked"
+
+        if self.check_element_exist(id="com.instagram.android:id/carousel_page_indicator"):
+            carousel_amount = int(
+                self.driver.find_element_by_id("com.instagram.android:id/carousel_bumping_text_indicator").text.split(
+                    '/')[1])
+            is_carousel = True
+            is_photo = False
+            is_video = False
+        elif self.check_element_exist("com.instagram.android:id/progress_bar"):
+            is_carousel = True
+            is_photo = False
+            is_video = self.check_element_exist("com.instagram.android:id/progress_bar")
+        else:
+            is_carousel = False
+            is_photo = True
+            is_video = False
+
+        # CLARIFAI INTEGRATION
+        # screenshot_as_base64 = self.driver.find_element_by_xpath(xpath='//android.widget.FrameLayout[@content-desc="Image"]/android.widget.ImageView').screenshot_as_base64
+        # screenshot_as_png = self.driver.find_element_by_xpath(xpath='//android.widget.FrameLayout[@content-desc="Image"]/android.widget.ImageView').screenshot_as_png
+        breakpoint()
+        # self.predict.get(base64_bytes=image_as_base64)
+
+    def search_hashtag(self, hashtag):
+        self.driver.find_element_by_accessibility_id("Search and Explore").click()
+        self.driver.find_element_by_id("com.instagram.android:id/action_bar_search_edit_text").click()
+        tabs = self.driver.find_element_by_id(
+            "com.instagram.android:id/fixed_tabbar_tabs_container").find_elements_by_class_name(
+            "android.widget.FrameLayout")
+        tabs[2].click()
+        self.logging.info("Searching hashtag: {}.".format(hashtag))
+        self.driver.find_element_by_id("com.instagram.android:id/action_bar_search_edit_text").send_keys(hashtag)
+        try:
+            rows_result = self.driver.find_element_by_id("android:id/list").find_elements_by_id(
+                "com.instagram.android:id/row_hashtag_container")
+        except Exception as err:
+            return False
+            pass
+        else:
+            sleep(3)
+            rows_result[0].click()
+            sleep(3)
+            return True
+
+    def check_element_exist(self, id):
+        try:
+            self.driver.find_element_by_id(id)
+        except NoSuchElementException:
+            return False
+        return True
+
     def wait(self, limit: float = 5):
         sleep(random.uniform(2, limit))
 
     def do_exception(self, err):
-        breakpoint()
         self.logging.error(err)
-
-    def swipe_right_left(self):
-        TouchAction(self.driver).press(x=1030, y=500).move_to(x=30, y=500).release().perform()
-
-    def swipe_left_right(self):
-        TouchAction(self.driver).press(x=30, y=500).move_to(x=1030, y=500).release().perform()
-
-    def check_post(self):
-        breakpoint()
-        has_liked = self.driver.find_element_by_id("com.instagram.android:id/row_feed_button_like").tag_name == "Liked"
-
-        n_comments = re.sub('[^0-9]', '', self.driver.find_element_by_id(
-            "com.instagram.android:id/row_feed_view_all_comments_text").text)
-
-        media_caption = re.sub('[^0-9]', '', self.driver.find_element_by_id(
-            "com.instagram.android:id/row_feed_view_all_comments_text").text)
-
-        owner_username = self.driver.find_element_by_id("com.instagram.android:id/row_feed_photo_profile_name").text
-
-        breakpoint()
-        try:
-            is_video = isinstance(
-                self.driver.find_element_by_id("com.instagram.android:id/media_group").find_elements_by_class_name(
-                    name="class android.widget.ProgressBar"), list)
-        except Exception as err:
-            is_video = False
-            pass
-
-        breakpoint()
-
-    def like_by_tags(self, tags: list = None, amount: int = 50, skip_top_posts: bool = True):
-        self.wait(3)
-
-        self.logging.info("")
-
-        self.driver.find_element_by_accessibility_id("Search and Explore").click()
-
-        btn_search_bar = self.driver.find_element_by_id("com.instagram.android:id/action_bar_search_edit_text")
-        btn_search_bar.click()
-        btn_search_bar.send_keys(hashtag)
-
-        top_bar = self.driver.find_element_by_id(
-            "com.instagram.android:id/fixed_tabbar_tabs_container").find_elements_by_class_name(
-            "android.widget.FrameLayout")
-        top_bar[2].click()
-
-        breakpoint()
-
-        # fix down
-        for e in self.driver.find_element_by_id("android:id/list").find_elements_by_class_name(
-                name="android.widget.FrameLayout"):
-            e.click()
-
-        self.do_feed()
-
-    def scrool_down(self):
-        rect = self.driver.find_element_by_id("com.instagram.android:id/layout_container_main").rect
-        press_x = random.randint(rect['x'] + 10, rect['width'] - 10)
-        press_y = rect['height'] - random.randint(5, 10)
-        move_to_x = random.randint(2, 5)
-        move_to_y = random.randint(2, 5)
-        TouchAction(self.driver).press(x=press_x, y=press_y).move_to(x=move_to_x, y=move_to_y).release().perform()
-        breakpoint()
-
-    def get_info_post(self):
-        options = self.driver.find_element_by_accessibility_id("Options")
-        options.click()
-        copy_link = self.driver.find_element_by_xpath(
-            "/hierarchy/android.widget.FrameLayout/android.widget.FrameLayout/android.widget.FrameLayout/android.widget.LinearLayout/android.widget.ListView/android.widget.FrameLayout[2]")
-        copy_link.click()
-
-        print(pyperclip.paste())
-
-        breakpoint()
-
-    def do_feed(self):
-        breakpoint()
-
-    def get_following(self):
-        breakpoint()
-        self.driver.find_element_by_accessibility_id("Profile").click()
-        sleep(2)
-        self.driver.find_element_by_accessibility_id("Profile").click()
-        self.driver.find_element_by_id("com.instagram.android:id/row_profile_header_following_container").click()
 
     def end(self):
         self.appiumservice.stop()
