@@ -4,19 +4,29 @@
 import argparse
 import json
 import random
+import re
+import shlex
+import subprocess
+import sys
+
 import pyperclip
 import logging
 from time import sleep
 
 from appium import webdriver
+from appium.webdriver.appium_service import AppiumService
 from appium.webdriver.common.touch_action import TouchAction
+from selenium.webdriver.common.by import By
+
+
 
 
 class BurbnBot:
     def __init__(self, configfile: str = None):
         caps = {
             "platformName": "Android",
-            "deviceName": "Dev"
+            "deviceName": "Dev",
+            'automationName': 'UiAutomator2'
         }
 
         parser = argparse.ArgumentParser(add_help=True)
@@ -25,54 +35,70 @@ class BurbnBot:
 
         settings = json.load(open(args.settings))
         self.username = settings['instagram']['username']
-        self.logfolder = "log/"
+        self.logPath = "log/"
+        self.appiumservice = AppiumService()
 
-        logging.basicConfig(filename='log/{}.log'.format(self.username), filemode='w',
-                                 format='%(name)s - %(levelname)s - %(message)s')
-        try:
-            self.driver = webdriver.Remote("http://localhost:4723/wd/hub", caps)
-        except Exception as err:
-            self.do_exception(err)
-            pass
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s]  %(message)s",
+            handlers=[
+                logging.FileHandler("{0}/{1}.log".format(self.logPath, self.username)),
+                logging.StreamHandler()
+            ])
+
+        self.logging = logging.getLogger()
 
         try:
+            self.logging.info("Lets do it!.")
+
+            self.logging.info('Starting emulator...')
+            # subprocess.Popen(shlex.split(settings['commands']['emulator']))
+            # sleep(15)
+
+            # self.appiumservice.start()
+
+            self.driver = webdriver.Remote(desired_capabilities=caps, command_executor="http://127.0.0.1:4723/wd/hub")
+            self.logging.info("Connected with Appium Server.")
+
             self.driver.start_session(caps)
-            logging.info(msg="Appium session started ID: {}".format(self.driver.session_id))
+            self.logging.info(msg="Appium session started ID: {}".format(self.driver.session_id))
         except Exception as err:
             self.do_exception(err)
+            self.end()
             pass
 
         if self.driver.is_app_installed("com.instagram.android"):
-            self.driver.implicitly_wait(30)
+            self.logging.info("Instagram installed.")
             self.driver.terminate_app('com.instagram.android')
             self.driver.find_element_by_accessibility_id("Instagram").click()
+            self.logging.info("Instagram starting.")
+            self.driver.implicitly_wait(time_to_wait=15)
 
     def test(self, profile):
-        el1 = self.driver.find_element_by_accessibility_id("Search and Explore")
+        try:
+            self.driver.find_element_by_xpath(
+                xpath='//android.widget.FrameLayout[@content-desc="Search and Explore"]').click()
+            self.driver.find_element_by_id("com.instagram.android:id/action_bar_search_edit_text").click()
+            self.driver.find_element_by_id("com.instagram.android:id/action_bar_search_edit_text").send_keys(profile)
 
-        el1.click()
-        el2 = self.driver.find_element_by_id("com.instagram.android:id/action_bar_search_edit_text")
-        el2.click()
-        el3 = self.driver.find_element_by_id("com.instagram.android:id/action_bar_search_edit_text")
-        el3.send_keys(profile)
+            self.driver.find_element_by_id("com.instagram.android:id/row_search_user_username").click()
 
-        results = self.driver.find_elements_by_id("com.instagram.android:id/row_search_user_username")
+            profile_viewpager = self.driver.find_element_by_class_name(name="androidx.recyclerview.widget.RecyclerView")
+            breakpoint()
+            list_posts = profile_viewpager.find_elements_by_class_name(name="android.widget.ImageView")
 
-        results[0].click()
+            list_posts[1]
 
-        profile_viewpager = self.driver.find_element_by_id("com.instagram.android:id/profile_viewpager")
-
-        list_posts = profile_viewpager.find_elements_by_class_name("android.widget.ImageView")
-
-        list_posts[0].click()
+        except Exception as err:
+            self.do_exception(err)
+            pass
 
     def wait(self, limit: float = 5):
         sleep(random.uniform(2, limit))
 
     def do_exception(self, err):
-        # self.instapy.browser.save_screenshot(
-        #     filename="screenshot/err/{}.png".format(datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")))
-        logging.error(err)
+        breakpoint()
+        self.logging.error(err)
 
     def swipe_right_left(self):
         TouchAction(self.driver).press(x=1030, y=500).move_to(x=30, y=500).release().perform()
@@ -80,10 +106,33 @@ class BurbnBot:
     def swipe_left_right(self):
         TouchAction(self.driver).press(x=30, y=500).move_to(x=1030, y=500).release().perform()
 
-    def do_hashtag(self, hashtag: str = None, top_posts: bool = False):
-        self.wait(3)
+    def check_post(self):
+        breakpoint()
+        has_liked = self.driver.find_element_by_id("com.instagram.android:id/row_feed_button_like").tag_name == "Liked"
+
+        n_comments = re.sub('[^0-9]', '', self.driver.find_element_by_id(
+            "com.instagram.android:id/row_feed_view_all_comments_text").text)
+
+        media_caption = re.sub('[^0-9]', '', self.driver.find_element_by_id(
+            "com.instagram.android:id/row_feed_view_all_comments_text").text)
+
+        owner_username = self.driver.find_element_by_id("com.instagram.android:id/row_feed_photo_profile_name").text
 
         breakpoint()
+        try:
+            is_video = isinstance(
+                self.driver.find_element_by_id("com.instagram.android:id/media_group").find_elements_by_class_name(
+                    name="class android.widget.ProgressBar"), list)
+        except Exception as err:
+            is_video = False
+            pass
+
+        breakpoint()
+
+    def like_by_tags(self, tags: list = None, amount: int = 50, skip_top_posts: bool = True):
+        self.wait(3)
+
+        self.logging.info("")
 
         self.driver.find_element_by_accessibility_id("Search and Explore").click()
 
@@ -134,3 +183,7 @@ class BurbnBot:
         sleep(2)
         self.driver.find_element_by_accessibility_id("Profile").click()
         self.driver.find_element_by_id("com.instagram.android:id/row_profile_header_following_container").click()
+
+    def end(self):
+        self.appiumservice.stop()
+        quit()
