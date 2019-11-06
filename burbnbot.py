@@ -6,6 +6,6 @@ burbn = BurbnBot(configfile="config/credentials.json")
 
 breakpoint()
 
-burbn.check_post()
+burbn.scrool_carousel()
 
 # burbn.hashtag_interact(hashtag="chicagomodel", top=True, recent=True)

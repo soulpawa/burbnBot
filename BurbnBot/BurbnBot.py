@@ -5,21 +5,15 @@ import argparse
 import json
 import os
 import random
-import re
 import shlex
 import subprocess
-import sys
 
-import pyperclip
 import logging
 from time import sleep
 
 from appium import webdriver
 from appium.webdriver.appium_service import AppiumService
 from appium.webdriver.common.touch_action import TouchAction
-
-# from .elements_compile import element
-# from selenium.webdriver.common.by import By
 from selenium.common.exceptions import NoSuchElementException
 
 from BurbnBot.Predict import Predict
@@ -93,8 +87,9 @@ class BurbnBot:
                 list_posts = header_list.find_element_by_id("android:id/list").find_elements_by_class_name(
                     "android.widget.ImageView")
                 list_posts[0].click()
-                self.check_post()
-                breakpoint()
+
+                self.get_post_info()
+
             else:
                 self.logging.info("No results found for {}.".format(hashtag))
 
@@ -102,7 +97,7 @@ class BurbnBot:
             self.do_exception(err)
             pass
 
-    def check_post(self):
+    def get_post_info(self):
         row_feed_photo_profile_name = self.driver.find_element_by_id(
             "com.instagram.android:id/row_feed_photo_profile_name")
         owner_username = row_feed_photo_profile_name.text.replace(" •", "")
@@ -114,9 +109,6 @@ class BurbnBot:
         has_liked = self.driver.find_element_by_id("com.instagram.android:id/row_feed_button_like").tag_name == "Liked"
 
         if self.check_element_exist(id="com.instagram.android:id/carousel_page_indicator"):
-            carousel_amount = int(
-                self.driver.find_element_by_id("com.instagram.android:id/carousel_bumping_text_indicator").text.split(
-                    '/')[1])
             is_carousel = True
             is_photo = False
             is_video = False
@@ -134,6 +126,25 @@ class BurbnBot:
         # screenshot_as_png = self.driver.find_element_by_xpath(xpath='//android.widget.FrameLayout[@content-desc="Image"]/android.widget.ImageView').screenshot_as_png
         breakpoint()
         # self.predict.get(base64_bytes=image_as_base64)
+
+    def scrool_carousel(self):
+        if self.check_element_exist(id="com.instagram.android:id/carousel_page_indicator"):
+            carousel_image = self.driver.find_element_by_id("com.instagram.android:id/carousel_image")
+            carousel_amount = int(self.driver.find_element_by_id("com.instagram.android:id/carousel_bumping_text_indicator").text.split('/')[1])
+            rect = carousel_image.rect
+            breakpoint()
+
+            for x in range(carousel_amount-1):
+                TouchAction(self.driver).press(x=971, y=1027).move_to(x=179, y=1010).release().perform()
+
+                # press_x = carousel_image.rect["width"]-random.randint(50, 80)
+                # press_y = random.randint(carousel_image.rect["y"]+50, carousel_image.rect["height"])
+                # moxe_x = 50
+                # move_y = press_y + (press_y * (random.randint(1,4)/100))
+                #
+                # TouchAction(self.driver).press(x=press_x, y=press_y).move_to(x=moxe_x, y=move_y).release().perform()
+
+            breakpoint()
 
     def search_hashtag(self, hashtag):
         self.driver.find_element_by_accessibility_id("Search and Explore").click()
