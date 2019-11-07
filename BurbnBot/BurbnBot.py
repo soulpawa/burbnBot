@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import random
+import shlex
 from time import sleep
 
 from appium import webdriver
@@ -18,6 +19,72 @@ class BurbnBot:
     logPath = "log/"
     username = ""
     driver = ""
+
+    def __init__(self, configfile: str = None):
+        parser = argparse.ArgumentParser(add_help=True)
+        parser.add_argument('-settings', type=str, help="json settings file")
+        args = parser.parse_args()
+        settings = json.load(open(args.settings))
+
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s]  %(message)s",
+            handlers=[
+                logging.FileHandler("{0}/{1}.log".format(self.logPath, self.username)),
+                logging.StreamHandler()
+            ])
+
+        self.logging = logging.getLogger()
+
+        try:
+            self.logging.info("Lets do it!.")
+
+            os.environ.setdefault(key="ANDROID_HOME", value=settings['commands']['android_home'])
+
+            self.logging.info("Starting Appium service.")
+            self.appiumservice = AppiumService()
+            self.appiumservice.stop()
+            self.appiumservice.start()
+
+            # self.dc['udid'] = 'emulator-5554'
+            self.dc['appPackage'] = 'com.instagram.android'
+            self.dc['isHeadless'] = 'false'
+            self.dc['disableWindowAnimation'] = 'true'
+            self.dc['appActivity'] = '.activity.MainTabActivity'
+            self.dc['noReset'] = 'true'
+            self.dc['platformName'] = 'android'
+            self.dc['automationName'] = 'UiAutomator2'
+            self.dc['deviceName'] = 'Dev'
+            self.dc['autoGrantPermissions'] = 'true'
+            self.dc['newCommandTimeout'] = '600'
+            self.dc['androidDeviceReadyTimeout'] = '30'
+            self.dc['avd'] = 'Dev'
+
+            if self.appiumservice.is_running:
+                self.logging.info("Appium Server is running.")
+                self.driver = webdriver.Remote('http://localhost:4723/wd/hub', self.dc)
+                self.logging.info("Connected with Appium Server.")
+
+        except Exception as err:
+            self.do_exception(err)
+            self.end()
+            pass
+
+    def do_exception(self, err):
+        self.logging.error(err)
+
+    def end(self):
+        self.appiumservice.stop()
+        self.logging.info("That's all folks! Bye bye!")
+        os.subprocess.Popen(shlex.split("adb -s emulator-5554 emu kill"))
+        quit()
+
+    def check_element_exist(self, id):
+        try:
+            self.driver.find_element_by_id(id)
+        except NoSuchElementException:
+            return False
+        return True
 
     def search_hashtag(self, hashtag):
         hashtag = hashtag.replace('#', '').lower()
@@ -53,16 +120,24 @@ class BurbnBot:
             if stories:
                 try:
                     self.driver.find_element_by_id("hashtag_feed_header_container").find_element_by_id(
-                        "profile_image").click()
+                        "branding_badge").click()
                     self.watch_stories(home=False)
                 except Exception as err:
                     self.logging.info("No Stories for hashtag {}, sorry.".format(hashtag))
                     pass
 
-            rows = self.driver.find_elements_by_xpath(xpath="//*[@class='android.widget.LinearLayout']")
-            for row in rows:
-                for p in row.find_elements_by_xpath("//*[@class='android.widget.ImageView']"):
-                    p.click()
+            i = 0
+            xpath_image_view = "//*[@class='android.widget.ListView']//*[@class='android.widget.LinearLayout']//*[@class='android.widget.ImageView']"
+            results = self.driver.find_elements_by_xpath(xpath=xpath_image_view)
+            while i <= len(results):
+                try:
+                    results[i].click()
+                except Exception as err:
+                    self.logging.info("ops, reset element")
+                    results = self.driver.find_elements_by_xpath(xpath=xpath_image_view)
+                    pass
+
+                if self.check_element_exist("row_feed_view_group_buttons"):
                     if self.get_type_post() == "carousel":
                         self.swipe_carousel()
                     elif self.get_type_post() == "video":
@@ -71,9 +146,12 @@ class BurbnBot:
                         self.logging.info("Only a picture, be nice.")
 
                     self.logging.info("Moving to next post.")
-                    breakpoint()
-
+                    i += 1
                     self.driver.back()
+                else:
+                    i += 1
+                    self.driver.back()
+            breakpoint()
 
     def watch_stories(self, home: bool = True):
         try:
@@ -98,8 +176,11 @@ class BurbnBot:
 
     def swipe_carousel(self):
         if self.get_type_post() == "carousel":
-            n = int(self.driver.find_element_by_xpath(
-                "//*[@resource-id='com.instagram.android:id/carousel_bumping_text_indicator']").text.split('/')[1])
+            try:
+                n = int(self.driver.find_element_by_id("carousel_bumping_text_indicator").text.split('/')[1])
+            except Exception as err:
+                n = 2  # if don't find the number of pictures work with only 2
+                pass
             self.logging.info("Let's check all the {} images here.".format(n))
             for x in range(n - 1):
                 self.driver.swipe(800, 600, 250, 600, random.randint(1000, 1500))
@@ -124,71 +205,3 @@ class BurbnBot:
             r = "video"
 
         return r
-
-    def __init__(self, configfile: str = None):
-        parser = argparse.ArgumentParser(add_help=True)
-        parser.add_argument('-settings', type=str, help="json settings file")
-        args = parser.parse_args()
-        settings = json.load(open(args.settings))
-
-        # self.dc['udid'] = 'emulator-5554'
-        self.dc['appPackage'] = 'com.instagram.android'
-        self.dc['isHeadless'] = 'false'
-        self.dc['disableWindowAnimation'] = 'true'
-        self.dc['appActivity'] = '.activity.MainTabActivity'
-        self.dc['noReset'] = 'true'
-        self.dc['platformName'] = 'android'
-        self.dc['automationName'] = 'UiAutomator2'
-        self.dc['deviceName'] = 'Dev'
-        self.dc['autoGrantPermissions'] = 'true'
-        self.dc['newCommandTimeout'] = '600'
-        self.dc['androidDeviceReadyTimeout'] = '30'
-        self.dc['avd'] = 'Dev'
-
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s]  %(message)s",
-            handlers=[
-                logging.FileHandler("{0}/{1}.log".format(self.logPath, self.username)),
-                logging.StreamHandler()
-            ])
-
-        self.logging = logging.getLogger()
-
-        try:
-            self.logging.info("Lets do it!.")
-
-            os.environ.setdefault(key="ANDROID_HOME", value=settings['commands']['android_home'])
-
-            self.logging.info("Starting Appium service.")
-            self.appiumservice = AppiumService()
-            self.appiumservice.stop()
-            self.appiumservice.start()
-
-            if self.appiumservice.is_running:
-                self.logging.info("Appium Server is running.")
-                self.driver = webdriver.Remote('http://localhost:4723/wd/hub', self.dc)
-
-                self.logging.info("Connected with Appium Server.")
-
-
-        except Exception as err:
-            self.do_exception(err)
-            self.end()
-            pass
-
-    def do_exception(self, err):
-        self.logging.error(err)
-
-    def end(self):
-        self.appiumservice.stop()
-        # subprocess.Popen(shlex.split("adb -s emulator-5554 emu kill"))
-        self.logging.info("That's all folks! Bye bye!")
-        quit()
-
-    def check_element_exist(self, id):
-        try:
-            self.driver.find_element_by_id(id)
-        except NoSuchElementException:
-            return False
-        return True
