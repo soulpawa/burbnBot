@@ -1,0 +1,43 @@
+{
+  "android": {
+    "android_home": "/path/to/Android/sdk"
+  },
+  "clarifai": {
+    "api_key": "abcdefghijklmnopqrstuzwxyz123456",
+    "workflow": "my-workflow",
+    "concepts_skip": [
+      "no person",
+      "man",
+      "child",
+      "text"
+    ],
+    "concepts": [
+      "fashion",
+      "woman",
+      "portrait",
+      "one"
+    ]
+  },
+  "desired_caps": {
+    "appPackage": "com.instagram.android",
+    "isHeadless": "false",
+    "disableWindowAnimation": "true",
+    "appActivity": ".activity.MainTabActivity",
+    "noReset": "true",
+    "platformName": "android",
+    "automationName": "UiAutomator2",
+    "deviceName": "Dev",
+    "autoGrantPermissions": "true",
+    "newCommandTimeout": "600",
+    "androidDeviceReadyTimeout": "30",
+    "avd": "Dev"
+  },
+  "instagram": {
+    "username": "username",
+    "password": "password"
+  },
+  "telegram": {
+    "token": "123456789:abcdefghijklmnopqrsxyz123456890",
+    "chat_id": 123456789
+  }
+}
