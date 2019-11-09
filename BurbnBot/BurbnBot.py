@@ -3,15 +3,18 @@ import json
 import logging
 import os
 import random
-import shlex
 from time import sleep
 
 from appium import webdriver
 from appium.webdriver.appium_service import AppiumService
+from appium.webdriver.common.touch_action import TouchAction
 from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions
 from selenium.webdriver.support.ui import WebDriverWait
+
+from .GraphQL import GraphQl
+from .Predict import Predict
 
 
 class BurbnBot:
@@ -19,12 +22,15 @@ class BurbnBot:
     logPath = "log/"
     username = ""
     driver = ""
+    graphql = GraphQl()
+    instabot = None
+    settings = {}
 
     def __init__(self, configfile: str = None):
         parser = argparse.ArgumentParser(add_help=True)
         parser.add_argument('-settings', type=str, help="json settings file")
         args = parser.parse_args()
-        settings = json.load(open(args.settings))
+        self.settings = json.load(open(args.settings))
 
         logging.basicConfig(
             level=logging.INFO,
@@ -39,31 +45,27 @@ class BurbnBot:
         try:
             self.logging.info("Lets do it!.")
 
-            os.environ.setdefault(key="ANDROID_HOME", value=settings['commands']['android_home'])
+            os.environ.setdefault(key="ANDROID_HOME", value=self.settings['android']['android_home'])
 
             self.logging.info("Starting Appium service.")
             self.appiumservice = AppiumService()
             self.appiumservice.stop()
             self.appiumservice.start()
 
-            # self.dc['udid'] = 'emulator-5554'
-            self.dc['appPackage'] = 'com.instagram.android'
-            self.dc['isHeadless'] = 'false'
-            self.dc['disableWindowAnimation'] = 'true'
-            self.dc['appActivity'] = '.activity.MainTabActivity'
-            self.dc['noReset'] = 'true'
-            self.dc['platformName'] = 'android'
-            self.dc['automationName'] = 'UiAutomator2'
-            self.dc['deviceName'] = 'Dev'
-            self.dc['autoGrantPermissions'] = 'true'
-            self.dc['newCommandTimeout'] = '600'
-            self.dc['androidDeviceReadyTimeout'] = '30'
-            self.dc['avd'] = 'Dev'
-
             if self.appiumservice.is_running:
                 self.logging.info("Appium Server is running.")
-                self.driver = webdriver.Remote('http://localhost:4723/wd/hub', self.dc)
+                self.driver = webdriver.Remote(
+                    command_executor="http://localhost:4723/wd/hub",
+                    desired_capabilities=self.settings['desired_caps']
+                )
                 self.logging.info("Connected with Appium Server.")
+                self.driver.switch_to.context("NATIVE_APP")
+
+                self.actions = TouchAction(self.driver)
+
+                self.predict = Predict(api_key=self.settings['clarifai']['api_key'])
+
+                # self.instabot = instabot.Bot(base_path="InstaBot/")
 
         except Exception as err:
             self.do_exception(err)
@@ -76,7 +78,6 @@ class BurbnBot:
     def end(self):
         self.appiumservice.stop()
         self.logging.info("That's all folks! Bye bye!")
-        os.subprocess.Popen(shlex.split("adb -s emulator-5554 emu kill"))
         quit()
 
     def check_element_exist(self, id):
@@ -89,6 +90,7 @@ class BurbnBot:
     def search_hashtag(self, hashtag):
         hashtag = hashtag.replace('#', '').lower()
         self.logging.info("Searching for hashtag: {}.".format(hashtag))
+        self.graphql.tags(tag=hashtag)
         self.driver.switch_to.context("NATIVE_APP")
         self.driver.find_element_by_accessibility_id("Search and Explore").click()
         self.driver.find_element_by_id('action_bar_search_edit_text').click()
@@ -109,8 +111,7 @@ class BurbnBot:
             sleep(3)
             return True
 
-    def hashtag_interact(self, hashtag: str = None, aba: str = "top", stories: bool = False):
-        self.driver.switch_to.context("NATIVE_APP")
+    def hashtag_interact(self, amount: int = 15, hashtag: str = None, aba: str = "top", stories: bool = False):
         if self.search_hashtag(hashtag=hashtag):
             try:
                 self.driver.find_element_by_xpath(xpath="//*[@text='{}']".format(aba.upper())).click()
@@ -125,33 +126,62 @@ class BurbnBot:
                 except Exception as err:
                     self.logging.info("No Stories for hashtag {}, sorry.".format(hashtag))
                     pass
+            n = 1
+            while n <= amount:
+                for i in self.graphql.tags(tag=hashtag, aba=aba):
+                    p = "https://www.instagram.com/p/{}/".format(i['node']['shortcode'])
+                    post_info = self.graphql.post_info(url=p)
+                    self.driver.get(url=p)
+                    self.logging.info("Checking post {}.".format(p))
+                    if not post_info['is_ad']:
+                        if self.predict.check(self.logging, url=post_info['media_url'],
+                                              tags=self.settings['clarifai']['concepts'],
+                                              tags_skip=self.settings['clarifai']['concepts_skip'],
+                                              is_video=post_info['is_video']):
+                            self.like()
 
-            i = 0
-            xpath_image_view = "//*[@class='android.widget.ListView']//*[@class='android.widget.LinearLayout']//*[@class='android.widget.ImageView']"
-            results = self.driver.find_elements_by_xpath(xpath=xpath_image_view)
-            while i <= len(results):
-                try:
-                    results[i].click()
-                except Exception as err:
-                    self.logging.info("ops, reset element")
-                    results = self.driver.find_elements_by_xpath(xpath=xpath_image_view)
-                    pass
-
-                if self.check_element_exist("row_feed_view_group_buttons"):
-                    if self.get_type_post() == "carousel":
-                        self.swipe_carousel()
-                    elif self.get_type_post() == "video":
-                        self.watch_video()
-                    else:
-                        self.logging.info("Only a picture, be nice.")
-
-                    self.logging.info("Moving to next post.")
-                    i += 1
                     self.driver.back()
-                else:
-                    i += 1
-                    self.driver.back()
+                    sleep(random.randint(2, 5))
+                    n += 1
+                    if n % 9:
+                        self.driver.swipe(
+                            start_x=random.randint(50, 1000), start_y=random.randint(1700, 1900),
+                            end_x=random.randint(50, 1000), end_y=random.randint(900, 1000),
+                            duration=random.randint(500, 900)
+                        )
+
+    def like(self):
+        try:
+            WebDriverWait(self.driver, 10).until(expected_conditions.presence_of_element_located(
+                (By.XPATH, "//*[@resource-id='com.instagram.android:id/row_feed_button_like']")))
+            e = self.driver.find_element_by_xpath("//*[@resource-id='com.instagram.android:id/row_feed_button_like']")
+            if e.tag_name == "Liked":
+                self.logging.info("Ops, you already like this one, sorry.")
+            else:
+                e.click()
+                sleep(random.randint(1, 3))
+                self.logging.info("Image Liked.")
+        except Exception as err:
+            self.logging.info("Ops, something wrong on like, sorry.")
+            self.logging.error(err)
+            pass
+
+    def like_double_tap(self):
+        try:
+            try:
+                e = self.driver.find_element_by_id("zoomable_view_container")
+            except Exception as e:
+                e = self.driver.find_element_by_id("carousel_media_group")
+                pass
+            self.driver.tap(
+                positions=[(e.rect["width"] / 2, e.rect["height"] / 2), (e.rect["width"] / 2, e.rect["height"] / 2)],
+                duration=1)
+            sleep(3)
             breakpoint()
+        except Exception as err:
+            self.logging.info("Ops, something wrong, sorry.")
+            self.logging.error(err)
+            pass
 
     def watch_stories(self, home: bool = True):
         try:
@@ -183,9 +213,9 @@ class BurbnBot:
                 pass
             self.logging.info("Let's check all the {} images here.".format(n))
             for x in range(n - 1):
-                self.driver.swipe(800, 600, 250, 600, random.randint(1000, 1500))
+                self.driver.swipe(800, 600, 250, 600, random.randint(500, 1000))
             for x in range(n - 1):
-                self.driver.swipe(300, 650, 800, 600, random.randint(1000, 1500))
+                self.driver.swipe(300, 650, 800, 600, random.randint(500, 1000))
 
     def watch_video(self):
         t = random.randint(5, 15)

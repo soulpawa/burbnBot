@@ -1,2 +1,4 @@
+clarifai
+instabot
 selenium
 Appium-Python-Client
