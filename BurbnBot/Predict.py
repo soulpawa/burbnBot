@@ -10,17 +10,22 @@ class Predict:
         self.model = self.app.public_models.general_model
 
     def check(self, logger, url: str = None, tags: list = [], tags_skip: list = [], is_video: bool = False):
-        concepts = self.get(url=url, is_video=is_video)
-        if len(tags_skip) > 0:
-            if any((tag in concepts for tag in tags_skip)):
-                logger.info(
-                    'Not interacting, image contains concept(s): "{}".'.format(
-                        ", ".join(list(set(concepts) & set(tags_skip)))
+        try:
+            concepts = self.get(url=url, is_video=is_video)
+            if len(tags_skip) > 0:
+                if any((tag in concepts for tag in tags_skip)):
+                    logger.info(
+                        'Not interacting, image contains concept(s): "{}".'.format(
+                            ", ".join(list(set(concepts) & set(tags_skip)))
+                        )
                     )
-                )
-                return False
-            else:
-                return any((tag in concepts for tag in tags))
+                    return False
+                else:
+                    return any((tag in concepts for tag in tags))
+        except Exception as err:
+            self.logging.info("Ops, something wrong on clarifai predict, sorry.")
+            self.logging.error(err)
+            pass
 
     def get(self, url, is_video=False):
         try:
