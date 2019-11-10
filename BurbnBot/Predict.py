@@ -23,8 +23,8 @@ class Predict:
                 else:
                     return any((tag in concepts for tag in tags))
         except Exception as err:
-            self.logging.info("Ops, something wrong on clarifai predict, sorry.")
-            self.logging.error(err)
+            self.logger.info("Ops, something wrong on clarifai predict, sorry.")
+            self.logger.error(err)
             pass
 
     def get(self, url, is_video=False):
