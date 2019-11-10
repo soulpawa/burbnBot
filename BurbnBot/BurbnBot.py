@@ -154,76 +154,50 @@ class BurbnBot:
             return False
         return True
 
-    def hashtag_interact(self, amount: int = 15, hashtag: str = None, aba: str = "top", stories: bool = False):
+    def interact_by_location(self, amount: int = 15, location_id: int = ""):
+        self.instabot.api.get_location_feed(location_id=213819997, max_id=9999)
+        last_json = self.instabot.last_json
+        if amount > len(last_json['items']):
+            amount = len(last_json['items'])
+        counter = 0
+        while counter < amount:
+            self.interact(last_json['items'][counter]['id'])
+            counter += 1
+
+    def interact_by_hashtag(self, amount: int = 15, hashtag: str = None):
         hashtag_medias = self.instabot.get_hashtag_medias(hashtag=hashtag, filtration=False)
-        self.start_driver()
-        n = 1
-        for id_medias in hashtag_medias[0:amount]:
-            post_info = self.instabot.get_media_info(media_id=id_medias)
+        counter = 0
+        while counter <= amount:
+            self.interact(hashtag_medias[counter])
+            counter += 1
 
-            if post_info[0]['media_type'] == MediaType.PHOTO:
-                url_image = post_info[0]['image_versions2']['candidates'][0]['url']
-            elif post_info[0]['media_type'] == MediaType.CAROUSEL:
-                url_image = post_info[0]['carousel_media'][0]['image_versions2']['candidates'][0]['url']
-            else:
-                url_image = post_info[0]['video_versions'][0]['url']
+    def interact(self, id_medias):
+        post_info = self.instabot.get_media_info(media_id=id_medias)
 
-            p = "https://www.instagram.com/p/{}/".format(post_info[0]['code'])
+        if post_info[0]['media_type'] == MediaType.PHOTO:
+            url_image = post_info[0]['image_versions2']['candidates'][0]['url']
+        elif post_info[0]['media_type'] == MediaType.CAROUSEL:
+            url_image = post_info[0]['carousel_media'][0]['image_versions2']['candidates'][0]['url']
+        else:
+            url_image = post_info[0]['video_versions'][0]['url']
 
-            self.logger.info("Checking post {}.".format(p))
+        p = "https://www.instagram.com/p/{}/".format(post_info[0]['code'])
+        self.logger.info("Checking post {}.".format(p))
 
+        if not post_info[0]['has_liked']:
             if self.predict.check(self.logger, url=url_image,
                                   tags=self.settings['clarifai']['concepts'],
                                   tags_skip=self.settings['clarifai']['concepts_skip'],
                                   is_video=(post_info[0]['media_type'] == 2)):
-
-                if self.like(url=p):
-                    sleep(random.randint(2, 5))
-                    n += 1
-
-                self.driver.back()
-                if n % 9:
-                    self.driver.swipe(
-                        start_x=random.randint(50, 1000), start_y=random.randint(1700, 1900),
-                        end_x=random.randint(50, 1000), end_y=random.randint(900, 1000),
-                        duration=random.randint(500, 900)
-                    )
-        self.stop_driver()
-
-    def interact_by_hashtagd(self, amount: int = 15, hashtag: str = None):
-        hashtag_medias = self.instabot.get_hashtag_medias(hashtag=hashtag, filtration=False)
-        counter = 0
-
-        while counter <= amount:
-            id_medias = hashtag_medias[counter]
-            post_info = self.instabot.get_media_info(media_id=id_medias)
-
-            if post_info[0]['media_type'] == MediaType.PHOTO:
-                url_image = post_info[0]['image_versions2']['candidates'][0]['url']
-            elif post_info[0]['media_type'] == MediaType.CAROUSEL:
-                url_image = post_info[0]['carousel_media'][0]['image_versions2']['candidates'][0]['url']
-            else:
-                url_image = post_info[0]['video_versions'][0]['url']
-
-            p = "https://www.instagram.com/p/{}/".format(post_info[0]['code'])
-
-            self.logger.info("Checking post {}.".format(p))
-
-            if not post_info[0]['has_liked']:
-                if self.predict.check(self.logger, url=url_image,
-                                      tags=self.settings['clarifai']['concepts'],
-                                      tags_skip=self.settings['clarifai']['concepts_skip'],
-                                      is_video=(post_info[0]['media_type'] == 2)):
-                    self.actions.append(
-                        {
-                            "function": "like",
-                            "argument": {
-                                "url": p,
-                                "media_type": post_info[0]['media_type']
-                            }
+                self.actions.append(
+                    {
+                        "function": "like",
+                        "argument": {
+                            "url": p,
+                            "media_type": post_info[0]['media_type']
                         }
-                    )
-            counter += 1
+                    }
+                )
 
     def do_actions(self):
         self.start_driver()
