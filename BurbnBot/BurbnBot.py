@@ -90,9 +90,7 @@ class BurbnBot:
         elem_unfollow = "//*[@resource-id='com.instagram.android:id/follow_sheet_unfollow_row']"
         elem_follow = "//*[@class='android.widget.LinearLayout']//*[@text='Follow']"
 
-        p = "https://www.instagram.com/{}/".format(user)
-        self.driver.get(url=p)
-        sleep(5)
+        self.driver.get(url="https://www.instagram.com/{}/".format(user))
         self.logger.info("Unfollowing user {}, I hope they don't take it personal.".format(user))
 
         WebDriverWait(self.driver, 10).until(
@@ -102,6 +100,7 @@ class BurbnBot:
         WebDriverWait(self.driver, 10).until(expected_conditions.presence_of_element_located((By.XPATH, elem_unfollow)))
         self.driver.find_element_by_xpath(elem_unfollow).click()
 
+        sleep(2)
         if self.check_element_exist("button_positive"):
             self.driver.find_element_by_xpath("//*[@resource-id='com.instagram.android:id/button_positive']").click()
             self.logger.info("If you change your mind, you'll have to request to follow @{} again.".format(user))
@@ -160,16 +159,12 @@ class BurbnBot:
         return True
 
     def chimping_timeline(self):
-        self.driver.get(url="https://www.instagram.com/{}/".format(self.username))
+
+        self.refreshing()
+
         amount = random.randint(5, 15)
         count = 0
         pbar = tqdm(total=amount, desc="Let's chimping the timeline a bit.")
-        self.driver.find_element_by_xpath(
-            "//*[@resource-id='com.instagram.android:id/tab_bar']//*[@content-desc='Home']").click()
-        self.driver.find_element_by_xpath(
-            "//*[@resource-id='com.instagram.android:id/tab_bar']//*[@content-desc='Home']").click()
-        self.driver.find_element_by_xpath(
-            "//*[@resource-id='com.instagram.android:id/action_bar_textview_custom_title_container']").click()
         while count < amount:
             x1 = random.randint(1000, 1200)
             y1 = random.randint(2000, 2500)
@@ -177,34 +172,48 @@ class BurbnBot:
             y2 = random.randint(900, 1200)
             duration = random.randint(1000, 2000)
             self.driver.swipe(x1, y1, x2, y2, duration)
-            pbar.update(1)
             count += 1
+            pbar.update(count)
 
-    def chimping_stories(self):
+    def refreshing(self):
         self.driver.get(url="https://www.instagram.com/{}/".format(self.username))
-        self.logger.info("Let's watch some stories.")
         self.driver.find_element_by_xpath(
             "//*[@resource-id='com.instagram.android:id/tab_bar']//*[@content-desc='Home']").click()
         self.driver.find_element_by_xpath(
             "//*[@resource-id='com.instagram.android:id/tab_bar']//*[@content-desc='Home']").click()
         self.driver.find_element_by_xpath(
             "//*[@resource-id='com.instagram.android:id/action_bar_textview_custom_title_container']").click()
+        x1 = random.randint(700, 800)
+        y1 = random.randint(700, 800)
+        x2 = random.randint(700, 750)
+        y2 = random.randint(2700, 2800)
+        duration = random.randint(3500, 4000)
+        self.driver.swipe(x1, y1, x2, y2, duration)
+
+    def chimping_stories(self):
+
+        self.refreshing()
 
         stories_thumbnails = self.driver.find_elements_by_xpath(
             "//*[@resource-id='com.instagram.android:id/outer_container']")
 
         stories_thumbnails[1].click()
 
+        count = 0
+        amount = random.randint(2, 5)
         try:
-            while self.check_element_exist(id="reel_viewer_texture_view"):
-                t = random.randint(5, 15)
-                self.logger.info("Sleeping for {} seconds.".format(t))
+            pbar = tqdm(total=amount, desc="Watching {} stories.".format(amount))
+            while count < amount:
+                t = random.randint(5, 10)
                 sleep(t)
                 if self.check_element_exist(id="reel_viewer_texture_view"):
-                    r = self.driver.find_element_by_id("reel_viewer_texture_view").rect
-                    x = (r["width"] / 2) / 2
-                    y = r["y"] + (r["height"] / 2)
-                    self.driver.tap([(x, y)], random.randint(3, 10))
+                    x1 = random.randint(750, 850)
+                    y1 = random.randint(550, 650)
+                    x2 = random.randint(200, 300)
+                    y2 = random.randint(550, 650)
+                    self.driver.swipe(x1, y1, x2, y2, random.randint(500, 1000))
+                count += 1
+                pbar.update(count)
         except Exception as err:
             self.logger.info("Ops, something wrong while waching stories, sorry.")
             self.logger.error(err)
@@ -226,9 +235,13 @@ class BurbnBot:
     def interact_by_hashtag(self, amount: int = 15, hashtag: str = None):
         hashtag_medias = self.instabot.get_hashtag_medias(hashtag=hashtag, filtration=False)
         counter = 0
-        while counter <= amount:
+        if amount > len(hashtag_medias):
+            amount = len(hashtag_medias)
+        pbar = tqdm(total=amount, desc="Liking posts with the hashtag {}.".format(hashtag))
+        while counter < amount:
             self.interact(hashtag_medias[counter])
             counter += 1
+            pbar.update(counter)
 
     def interact(self, id_medias):
         post_info = self.instabot.get_media_info(media_id=id_medias)
@@ -264,7 +277,7 @@ class BurbnBot:
         pbar = tqdm(total=amount, desc="Let's include some (not so real) actions.")
         while i < amount:
             self.actions.append({"function": "chimping_timeline"})
-            # self.actions.append({"function": "chimping_stories"})
+            self.actions.append({"function": "chimping_stories"})
             i += 1
             pbar.update(i)
 
@@ -274,7 +287,7 @@ class BurbnBot:
 
         self.start_driver()
         self.driver.get(url="https://www.instagram.com/{}/".format(self.username))
-        for action in tqdm(self.actions):
+        for action in self.actions:
             try:
                 method_to_call = getattr(self, action['function'])
                 if "argument" in action:
@@ -306,10 +319,10 @@ class BurbnBot:
 
                 e.click()
                 sleep(random.randint(1, 3))
-                self.logger.info("Image Liked.")
+                self.logger.info("Image {} Liked.".format(url))
                 return True
         except Exception as err:
-            self.logger.info("Ops, something wrong on like, sorry.")
+            self.logger.info("Ops, something wrong on try to like {}, sorry.".format(url))
             self.logger.error(err)
             return False
             pass
