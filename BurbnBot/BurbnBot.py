@@ -4,6 +4,7 @@ import logging
 import os
 import random
 import re
+from itertools import groupby
 from time import sleep
 
 import instabot
@@ -15,24 +16,21 @@ from selenium.webdriver.support import expected_conditions
 from selenium.webdriver.support.ui import WebDriverWait
 from tqdm import tqdm
 
-from .GraphQL import GraphQl
 from .MediaType import MediaType
 from .Predict import Predict
 
 
 class BurbnBot:
-    dc = {}
     logPath = "log/"
     username = ""
     driver = ""
-    graphql = GraphQl()
     instabot = None
     appiumservice = None
     settings = {}
-    do_likes = []
     actions = []
 
     def __init__(self, configfile: str = None):
+        self.configfile = configfile
         parser = argparse.ArgumentParser(add_help=True)
         parser.add_argument('-settings', type=str, help="json settings file")
         args = parser.parse_args()
@@ -54,6 +52,7 @@ class BurbnBot:
             self.predict = Predict(api_key=self.settings['clarifai']['api_key'])
 
             self.instabot = instabot.Bot(base_path="InstaBot/")
+            self.instabot.api.total_requests
             self.instabot.login(
                 username=self.settings['instagram']['username'],
                 password=self.settings['instagram']['password'],
@@ -93,6 +92,8 @@ class BurbnBot:
 
         p = "https://www.instagram.com/{}/".format(user)
         self.driver.get(url=p)
+        sleep(5)
+        self.logger.info("Unfollowing user {}, I hope they don't take it personal.".format(user))
 
         WebDriverWait(self.driver, 10).until(
             expected_conditions.presence_of_element_located((By.XPATH, elem_following)))
@@ -112,17 +113,21 @@ class BurbnBot:
 
     def unfollow_non_followers(self, avoid_saved=True, n_to_unfollows=None):
         self.logger.info("Unfollowing non-followers.")
-        following = self.instabot.following
+        following = []
+        for a in self.instabot.api.get_total_followings(user_id=self.instabot.user_id):
+            following.append(a["username"])
+
+        followers = []
+        for b in self.instabot.api.get_total_followers(user_id=self.instabot.user_id):
+            followers.append(b["username"])
 
         if avoid_saved:
             users_saved = self.get_owner_saved_post()
-            followers = self.instabot.followers + users_saved
-        else:
-            followers = self.instabot.followers
+            followers = followers + users_saved
 
         non_followers = [x for x in following if x not in followers]
-        for user_id in tqdm(non_followers[:n_to_unfollows]):
-            username = self.instabot.get_username_from_user_id(user_id=user_id)
+        self.logger.info("Setting command to unfollow users.")
+        for username in tqdm(non_followers[:n_to_unfollows]):
             self.actions.append(
                 {
                     "function": "unfollow",
@@ -136,7 +141,7 @@ class BurbnBot:
         r = []
         self.logger.info("Getting owner of saved posts")
         for p in tqdm(saveds):
-            r.append(str(p['media']['user']['pk']))
+            r.append(str(p['media']['user']['username']))
         return r
 
     def do_exception(self, err):
@@ -153,6 +158,60 @@ class BurbnBot:
         except NoSuchElementException:
             return False
         return True
+
+    def chimping_timeline(self):
+        self.driver.get(url="https://www.instagram.com/{}/".format(self.username))
+        amount = random.randint(5, 15)
+        count = 0
+        pbar = tqdm(total=amount, desc="Let's chimping the timeline a bit.")
+        self.driver.find_element_by_xpath(
+            "//*[@resource-id='com.instagram.android:id/tab_bar']//*[@content-desc='Home']").click()
+        self.driver.find_element_by_xpath(
+            "//*[@resource-id='com.instagram.android:id/tab_bar']//*[@content-desc='Home']").click()
+        self.driver.find_element_by_xpath(
+            "//*[@resource-id='com.instagram.android:id/action_bar_textview_custom_title_container']").click()
+        while count < amount:
+            x1 = random.randint(1000, 1200)
+            y1 = random.randint(2000, 2500)
+            x2 = random.randint(1000, 1200)
+            y2 = random.randint(900, 1200)
+            duration = random.randint(1000, 2000)
+            self.driver.swipe(x1, y1, x2, y2, duration)
+            pbar.update(1)
+            count += 1
+
+    def chimping_stories(self):
+        self.driver.get(url="https://www.instagram.com/{}/".format(self.username))
+        self.logger.info("Let's watch some stories.")
+        self.driver.find_element_by_xpath(
+            "//*[@resource-id='com.instagram.android:id/tab_bar']//*[@content-desc='Home']").click()
+        self.driver.find_element_by_xpath(
+            "//*[@resource-id='com.instagram.android:id/tab_bar']//*[@content-desc='Home']").click()
+        self.driver.find_element_by_xpath(
+            "//*[@resource-id='com.instagram.android:id/action_bar_textview_custom_title_container']").click()
+
+        stories_thumbnails = self.driver.find_elements_by_xpath(
+            "//*[@resource-id='com.instagram.android:id/outer_container']")
+
+        stories_thumbnails[1].click()
+
+        try:
+            while self.check_element_exist(id="reel_viewer_texture_view"):
+                t = random.randint(5, 15)
+                self.logger.info("Sleeping for {} seconds.".format(t))
+                sleep(t)
+                if self.check_element_exist(id="reel_viewer_texture_view"):
+                    r = self.driver.find_element_by_id("reel_viewer_texture_view").rect
+                    x = (r["width"] / 2) / 2
+                    y = r["y"] + (r["height"] / 2)
+                    self.driver.tap([(x, y)], random.randint(3, 10))
+        except Exception as err:
+            self.logger.info("Ops, something wrong while waching stories, sorry.")
+            self.logger.error(err)
+            pass
+
+        self.driver.get(url="https://www.instagram.com/{}/".format(self.username))
+
 
     def interact_by_location(self, amount: int = 15, location_id: int = ""):
         self.instabot.api.get_location_feed(location_id=213819997, max_id=9999)
@@ -200,12 +259,28 @@ class BurbnBot:
                 )
 
     def do_actions(self):
-        self.start_driver()
+        i = 0
+        amount = random.randint(len(self.actions), (len(self.actions) * 2))
+        pbar = tqdm(total=amount, desc="Let's include some (not so real) actions.")
+        while i < amount:
+            self.actions.append({"function": "chimping_timeline"})
+            # self.actions.append({"function": "chimping_stories"})
+            i += 1
+            pbar.update(i)
+
         random.shuffle(self.actions)
+
+        self.actions = [i[0] for i in groupby(self.actions)]
+
+        self.start_driver()
+        self.driver.get(url="https://www.instagram.com/{}/".format(self.username))
         for action in tqdm(self.actions):
             try:
                 method_to_call = getattr(self, action['function'])
-                method_to_call(action['argument'])
+                if "argument" in action:
+                    method_to_call(action['argument'])
+                else:
+                    method_to_call()
             except Exception as err:
                 self.do_exception(err)
                 pass
@@ -239,7 +314,7 @@ class BurbnBot:
             return False
             pass
 
-    def watch_stories(self, home: bool = True):
+    def watch_stories(self):
         try:
             while self.check_element_exist(id="reel_viewer_texture_view"):
                 t = random.randint(5, 15)

@@ -1,3 +1,4 @@
+tqdm
 clarifai
 instabot
 selenium
