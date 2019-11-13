@@ -40,7 +40,7 @@ class BurbnBot:
             level=logging.INFO,
             format="%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s]  %(message)s",
             handlers=[
-                logging.FileHandler("{0}/{1}.log".format(self.logPath, self.username)),
+                logging.FileHandler("{0}/{1}.log".format(self.logPath, self.settings['instagram']['username'])),
                 logging.StreamHandler()
             ])
 
@@ -52,7 +52,7 @@ class BurbnBot:
             self.predict = Predict(api_key=self.settings['clarifai']['api_key'])
 
             self.instabot = instabot.Bot(base_path="InstaBot/")
-            self.instabot.api.total_requests
+
             self.instabot.login(
                 username=self.settings['instagram']['username'],
                 password=self.settings['instagram']['password'],
@@ -110,7 +110,7 @@ class BurbnBot:
             return False
         return True
 
-    def unfollow_non_followers(self, avoid_saved=True, n_to_unfollows=None):
+    def unfollow_non_followers(self, avoid_saved=True, amount=None):
         self.logger.info("Unfollowing non-followers.")
         following = []
         for a in self.instabot.api.get_total_followings(user_id=self.instabot.user_id):
@@ -126,7 +126,7 @@ class BurbnBot:
 
         non_followers = [x for x in following if x not in followers]
         self.logger.info("Setting command to unfollow users.")
-        for username in tqdm(non_followers[:n_to_unfollows]):
+        for username in tqdm(non_followers[:amount]):
             self.actions.append(
                 {
                     "function": "unfollow",
@@ -159,50 +159,53 @@ class BurbnBot:
         return True
 
     def chimping_timeline(self):
-
-        self.refreshing()
-
-        amount = random.randint(5, 15)
-        count = 0
-        pbar = tqdm(total=amount, desc="Let's chimping the timeline a bit.")
-        while count < amount:
-            x1 = random.randint(1000, 1200)
-            y1 = random.randint(2000, 2500)
-            x2 = random.randint(1000, 1200)
-            y2 = random.randint(900, 1200)
-            duration = random.randint(1000, 2000)
-            self.driver.swipe(x1, y1, x2, y2, duration)
-            count += 1
-            pbar.update(count)
+        try:
+            self.refreshing()
+            amount = random.randint(5, 15)
+            count = 0
+            self.logger.info("Let's chimping the timeline a bit.")
+            el1 = self.driver.find_element_by_id("com.instagram.android:id/action_bar_root")
+            start_x = el1.rect["width"] - 50
+            start_y = el1.rect["height"] - 50
+            end_x = el1.rect["x"] + 50
+            end_y = el1.rect["y"] + 50
+            while count < amount:
+                self.driver.swipe(start_x, start_y, end_x, end_y, duration=random.randint(2500, 4000))
+                count += 1
+        except Exception as err:
+            pass
 
     def refreshing(self):
-        self.driver.get(url="https://www.instagram.com/{}/".format(self.username))
-        self.driver.find_element_by_xpath(
-            "//*[@resource-id='com.instagram.android:id/tab_bar']//*[@content-desc='Home']").click()
-        self.driver.find_element_by_xpath(
-            "//*[@resource-id='com.instagram.android:id/tab_bar']//*[@content-desc='Home']").click()
-        self.driver.find_element_by_xpath(
-            "//*[@resource-id='com.instagram.android:id/action_bar_textview_custom_title_container']").click()
-        x1 = random.randint(700, 800)
-        y1 = random.randint(700, 800)
-        x2 = random.randint(700, 750)
-        y2 = random.randint(2700, 2800)
-        duration = random.randint(3500, 4000)
-        self.driver.swipe(x1, y1, x2, y2, duration)
+        try:
+            self.driver.get(url="https://www.instagram.com/{}/".format(self.username))
+            self.driver.find_element_by_xpath(
+                "//*[@resource-id='com.instagram.android:id/tab_bar']//*[@content-desc='Home']").click()
+            self.driver.find_element_by_xpath(
+                "//*[@resource-id='com.instagram.android:id/tab_bar']//*[@content-desc='Home']").click()
+            self.driver.find_element_by_xpath(
+                "//*[@resource-id='com.instagram.android:id/action_bar_textview_custom_title_container']").click()
+
+            el1 = self.driver.find_element_by_id("com.instagram.android:id/row_feed_photo_profile_name")
+            el2 = self.driver.find_element_by_xpath("//android.widget.FrameLayout[@content-desc='Camera']")
+
+            start_x = el1.rect["x"]
+            start_y = el1.rect["y"]
+            end_x = el2.rect["x"]
+            end_y = el2.rect["y"] - 100
+            self.driver.swipe(start_x, start_y, end_x, end_y, duration=random.randint(350, 400))
+        except Exception as err:
+            pass
 
     def chimping_stories(self):
 
         self.refreshing()
-
-        stories_thumbnails = self.driver.find_elements_by_xpath(
-            "//*[@resource-id='com.instagram.android:id/outer_container']")
-
-        stories_thumbnails[1].click()
-
         count = 0
         amount = random.randint(2, 5)
         try:
-            pbar = tqdm(total=amount, desc="Watching {} stories.".format(amount))
+            stories_thumbnails = self.driver.find_elements_by_xpath(
+                "//*[@resource-id='com.instagram.android:id/outer_container']")
+            stories_thumbnails[1].click()
+            self.logger.info("Watching {} stories.".format(amount))
             while count < amount:
                 t = random.randint(5, 10)
                 sleep(t)
@@ -213,14 +216,12 @@ class BurbnBot:
                     y2 = random.randint(550, 650)
                     self.driver.swipe(x1, y1, x2, y2, random.randint(500, 1000))
                 count += 1
-                pbar.update(count)
         except Exception as err:
             self.logger.info("Ops, something wrong while waching stories, sorry.")
-            self.logger.error(err)
+            self.do_exception(err)
             pass
 
         self.driver.get(url="https://www.instagram.com/{}/".format(self.username))
-
 
     def interact_by_location(self, amount: int = 15, location_id: int = ""):
         self.instabot.api.get_location_feed(location_id=213819997, max_id=9999)
@@ -233,47 +234,58 @@ class BurbnBot:
             counter += 1
 
     def interact_by_hashtag(self, amount: int = 15, hashtag: str = None):
-        hashtag_medias = self.instabot.get_hashtag_medias(hashtag=hashtag, filtration=False)
-        counter = 0
-        if amount > len(hashtag_medias):
-            amount = len(hashtag_medias)
-        pbar = tqdm(total=amount, desc="Liking posts with the hashtag {}.".format(hashtag))
-        while counter < amount:
-            self.interact(hashtag_medias[counter])
-            counter += 1
-            pbar.update(counter)
+        try:
+            hashtag_medias = self.instabot.get_hashtag_medias(hashtag=hashtag, filtration=False)
+            counter = 0
+            if amount > len(hashtag_medias):
+                amount = len(hashtag_medias)
+            hashtagpbar = tqdm(total=amount, desc="Liking posts with the hashtag {}.".format(hashtag))
+            while counter < amount:
+                if self.interact(hashtag_medias[counter]):
+                    counter += 1
+                    hashtagpbar.update(counter)
+        except Exception as err:
+            self.logger.info("Ops, something wrong while working with hashtag {}, sorry.".format(hashtag))
+            self.do_exception(err)
+            pass
 
     def interact(self, id_medias):
-        post_info = self.instabot.get_media_info(media_id=id_medias)
+        try:
+            post_info = self.instabot.get_media_info(media_id=id_medias)
 
-        if post_info[0]['media_type'] == MediaType.PHOTO:
-            url_image = post_info[0]['image_versions2']['candidates'][0]['url']
-        elif post_info[0]['media_type'] == MediaType.CAROUSEL:
-            url_image = post_info[0]['carousel_media'][0]['image_versions2']['candidates'][0]['url']
-        else:
-            url_image = post_info[0]['video_versions'][0]['url']
+            if post_info[0]['media_type'] == MediaType.PHOTO:
+                url_image = post_info[0]['image_versions2']['candidates'][0]['url']
+            elif post_info[0]['media_type'] == MediaType.CAROUSEL:
+                url_image = post_info[0]['carousel_media'][0]['image_versions2']['candidates'][0]['url']
+            else:
+                url_image = post_info[0]['video_versions'][0]['url']
 
-        p = "https://www.instagram.com/p/{}/".format(post_info[0]['code'])
-        self.logger.info("Checking post {}.".format(p))
+            p = "https://www.instagram.com/p/{}/".format(post_info[0]['code'])
+            self.logger.info("Checking post {}.".format(p))
 
-        if not post_info[0]['has_liked']:
-            if self.predict.check(self.logger, url=url_image,
-                                  tags=self.settings['clarifai']['concepts'],
-                                  tags_skip=self.settings['clarifai']['concepts_skip'],
-                                  is_video=(post_info[0]['media_type'] == 2)):
-                self.actions.append(
-                    {
-                        "function": "like",
-                        "argument": {
-                            "url": p,
-                            "media_type": post_info[0]['media_type']
+            if not post_info[0]['has_liked']:
+                if self.predict.check(self.logger, url=url_image,
+                                      tags=self.settings['clarifai']['concepts'],
+                                      tags_skip=self.settings['clarifai']['concepts_skip'],
+                                      is_video=(post_info[0]['media_type'] == 2)):
+                    self.actions.append(
+                        {
+                            "function": "like",
+                            "argument": {
+                                "url": p,
+                                "media_type": post_info[0]['media_type']
+                            }
                         }
-                    }
-                )
+                    )
+            return True
+        except Exception as err:
+            return False
+            pass
 
     def do_actions(self):
         i = 0
         amount = random.randint(len(self.actions), (len(self.actions) * 2))
+        amount = len(self.actions)
         pbar = tqdm(total=amount, desc="Let's include some (not so real) actions.")
         while i < amount:
             self.actions.append({"function": "chimping_timeline"})
@@ -282,7 +294,6 @@ class BurbnBot:
             pbar.update(i)
 
         random.shuffle(self.actions)
-
         self.actions = [i[0] for i in groupby(self.actions)]
 
         self.start_driver()
@@ -294,7 +305,10 @@ class BurbnBot:
                     method_to_call(action['argument'])
                 else:
                     method_to_call()
+                sleep(random.randint(3, 15))
             except Exception as err:
+                self.logger.info(
+                    "Ops, something with the action {} ({}), sorry.".format(action['function'], action['argument']))
                 self.do_exception(err)
                 pass
         self.stop_driver()
