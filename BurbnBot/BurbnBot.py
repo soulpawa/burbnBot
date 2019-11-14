@@ -4,20 +4,23 @@ import logging
 import os
 import random
 import re
+from datetime import datetime
 from itertools import groupby
 from time import sleep
 
 import instabot
 from appium import webdriver
 from appium.webdriver.appium_service import AppiumService
+from appium.webdriver.common.touch_action import TouchAction
 from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions
 from selenium.webdriver.support.ui import WebDriverWait
 from tqdm import tqdm
 
-from .MediaType import MediaType
+from .ElementXpath import ElementXpath
 from .Predict import Predict
+from .Types import MediaType
 
 
 class BurbnBot:
@@ -26,8 +29,12 @@ class BurbnBot:
     driver = ""
     instabot = None
     appiumservice = None
+    touchaction = None
     settings = {}
     actions = []
+    follow_percentage = 50
+    amount_liked = 0
+    amount_followed = 0
 
     def __init__(self, configfile: str = None):
         self.configfile = configfile
@@ -79,6 +86,7 @@ class BurbnBot:
             )
             self.logger.info("Connected with Appium Server.")
             self.driver.switch_to.context("NATIVE_APP")
+            self.touchaction = TouchAction(self.driver)
 
     def stop_driver(self):
         self.driver.quit()
@@ -102,7 +110,7 @@ class BurbnBot:
 
         sleep(2)
         if self.check_element_exist("button_positive"):
-            self.driver.find_element_by_xpath("//*[@resource-id='com.instagram.android:id/button_positive']").click()
+            self.driver.find_element_by_xpath(ElementXpath.button_positive).click()
             self.logger.info("If you change your mind, you'll have to request to follow @{} again.".format(user))
         try:
             self.driver.find_element_by_xpath(elem_follow)
@@ -178,15 +186,12 @@ class BurbnBot:
     def refreshing(self):
         try:
             self.driver.get(url="https://www.instagram.com/{}/".format(self.username))
-            self.driver.find_element_by_xpath(
-                "//*[@resource-id='com.instagram.android:id/tab_bar']//*[@content-desc='Home']").click()
-            self.driver.find_element_by_xpath(
-                "//*[@resource-id='com.instagram.android:id/tab_bar']//*[@content-desc='Home']").click()
-            self.driver.find_element_by_xpath(
-                "//*[@resource-id='com.instagram.android:id/action_bar_textview_custom_title_container']").click()
+            self.driver.find_element_by_xpath(ElementXpath.tab_bar_home).click()
+            self.driver.find_element_by_xpath(ElementXpath.tab_bar_home).click()
+            self.driver.find_element_by_xpath(ElementXpath.top_title).click()
 
-            el1 = self.driver.find_element_by_id("com.instagram.android:id/row_feed_photo_profile_name")
-            el2 = self.driver.find_element_by_xpath("//android.widget.FrameLayout[@content-desc='Camera']")
+            el1 = self.driver.find_element_by_xpath(ElementXpath.row_feed_photo_profile_name)
+            el2 = self.driver.find_element_by_xpath(ElementXpath.tab_bar_camera)
 
             start_x = el1.rect["x"]
             start_y = el1.rect["y"]
@@ -282,16 +287,22 @@ class BurbnBot:
             return False
             pass
 
+    def set_do_follow(self, follow_percentage: int = 0):
+        self.follow_percentage = follow_percentage
+
     def do_actions(self):
+        likes_actions = [i for i in self.actions if i["function"] == "like"]
+        self.posts_to_follow = random.sample(range(0, len(likes_actions)),
+                                             int(len(likes_actions) * (self.follow_percentage / 100)))
+
         i = 0
-        amount = random.randint(len(self.actions), (len(self.actions) * 2))
         amount = len(self.actions)
         pbar = tqdm(total=amount, desc="Let's include some (not so real) actions.")
-        while i < amount:
-            self.actions.append({"function": "chimping_timeline"})
-            self.actions.append({"function": "chimping_stories"})
-            i += 1
-            pbar.update(i)
+        # while i < amount:
+        #     self.actions.append({"function": "chimping_timeline"})
+        #     self.actions.append({"function": "chimping_stories"})
+        #     i += 1
+        #     pbar.update(i)
 
         random.shuffle(self.actions)
         self.actions = [i[0] for i in groupby(self.actions)]
@@ -313,14 +324,40 @@ class BurbnBot:
                 pass
         self.stop_driver()
 
+    def follow(self):
+        try:
+            button_save = self.driver.find_element_by_xpath(ElementXpath.row_feed_button_save)
+            self.touchaction.long_press(button_save)
+            self.touchaction.perform()
+            collection_names = self.driver.find_elements_by_xpath(ElementXpath.collection_name)
+            strdate = datetime.now().strftime("%Y%m%d")
+            collection_today = [i for i in collection_names if i.text == strdate]
+            if len(collection_today) > 0:
+                collection_today[0].click()
+            else:
+                # https://www.instagram.com/p/B405BNnHtbO/?igshid=xj7un3d9cq06
+
+                self.driver.find_element_by_xpath(ElementXpath.save_to_collection_new_collection_button).click()
+                self.driver.find_element_by_xpath(ElementXpath.create_collection_edit_text).send_keys(strdate)
+                self.driver.find_element_by_xpath(ElementXpath.save_to_collection_action_button).click()
+
+            self.driver.find_element_by_xpath(ElementXpath.row_feed_photo_profile_name).click()
+            self.driver.find_element_by_xpath(ElementXpath.btn_follow).click()
+            user = self.driver.find_element_by_xpath(ElementXpath.action_bar_textview_title).text
+            self.logger.info("Following user {}.".format(user))
+            return True
+        except Exception as err:
+            return False
+            pass
+
     def like(self, param):
         url = param["url"]
         media_type = param["media_type"]
         self.driver.get(url=url)
         try:
             WebDriverWait(self.driver, 10).until(expected_conditions.presence_of_element_located(
-                (By.XPATH, "//*[@resource-id='com.instagram.android:id/row_feed_button_like']")))
-            e = self.driver.find_element_by_xpath("//*[@resource-id='com.instagram.android:id/row_feed_button_like']")
+                (By.XPATH, ElementXpath.row_feed_button_like)))
+            e = self.driver.find_element_by_xpath(ElementXpath.row_feed_button_like)
             if e.tag_name == "Liked":
                 self.logger.info("Ops, you already like this one, sorry.")
                 return False
@@ -334,6 +371,8 @@ class BurbnBot:
                 e.click()
                 sleep(random.randint(1, 3))
                 self.logger.info("Image {} Liked.".format(url))
+                if self.amount_liked in self.posts_to_follow:
+                    self.follow()
                 return True
         except Exception as err:
             self.logger.info("Ops, something wrong on try to like {}, sorry.".format(url))
@@ -356,8 +395,7 @@ class BurbnBot:
             pass
 
     def get_info(self):
-        row_feed_photo_profile_name = self.driver.find_element_by_id(
-            "com.instagram.android:id/row_feed_photo_profile_name")
+        row_feed_photo_profile_name = self.driver.find_element_by_xpath(ElementXpath.row_feed_photo_profile_name)
         owner_username = row_feed_photo_profile_name.text.replace(" •", "")
         has_liked = self.driver.find_element_by_id("com.instagram.android:id/row_feed_button_like").tag_name == "Liked"
         self.get_type_post()
@@ -365,8 +403,7 @@ class BurbnBot:
     def swipe_carousel(self):
         if self.get_type_post() == "carousel":
             try:
-                carousel_image = self.driver.find_element_by_xpath(
-                    "//*[@resource-id='com.instagram.android:id/carousel_image']")
+                carousel_image = self.driver.find_element_by_xpath(ElementXpath.carousel_image)
                 match = re.search(r"(\d+).*?(\d+)", carousel_image.tag_name)
                 n = int(match.group(2))
             except Exception as err:
