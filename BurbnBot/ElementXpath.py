@@ -19,3 +19,4 @@ class ElementXpath(object):
     stories_thumbnails = "//*[@resource-id='com.instagram.android:id/outer_container']"
     carousel_page_indicator = "com.instagram.android:id/carousel_page_indicator"
     video_progress_bar = "//*[@resource-id='com.instagram.android:id/progress_bar']"
+    btn_remove_from_collection = "//*[@resource-id='com.instagram.android:id/primary_button_row']"

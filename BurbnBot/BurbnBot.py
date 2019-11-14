@@ -117,8 +117,21 @@ class BurbnBot:
         self.driver.stop_client()
         self.appiumservice.stop()
 
+    def unsave(self, p):
+        try:
+            self.driver.get(url="https://www.instagram.com/p/{}/".format(p))
+            self.driver.find_element_by_xpath(ElementXpath.row_feed_button_save).click()
+            self.driver.find_element_by_xpath(ElementXpath.btn_remove_from_collection).click()
+            return True
+        except Exception as err:
+            self.treat_exception(err)
+            return False
+
     def unfollow(self, user):
         self.driver.get(url="https://www.instagram.com/{}/".format(user))
+        if self.check_element_exist(ElementXpath.btn_follow):
+            self.logger.info("You aren't following {}.".format(user))
+            return False
         self.logger.info("Unfollowing user {}, I hope they don't take it personal.".format(user))
 
         WebDriverWait(self.driver, 10).until(
@@ -471,6 +484,33 @@ class BurbnBot:
             pass
         self.logger.info('Watching video for {} seconds.'.format(t))
         sleep(t)
+
+    def get_collections(self):
+        self.instabot.api.send_request("collections/list/")
+        return self.instabot.last_json
+
+    def get_collection(self, collection_id):
+        self.instabot.api.send_request("feed/collection/{}/".format(collection_id))
+        return self.instabot.last_json
+
+    def unfollow_by_collection(self, name):
+        collections = self.get_collections()
+        for c in collections["items"]:
+            if c['collection_name'] == name:
+                collection = self.get_collection(collection_id=c['collection_id'])
+                for i in tqdm(collection["items"], desc="Getting users from colletion {} to unfollow.".format(name)):
+                    self.actions.append(
+                        {
+                            "function": "unfollow",
+                            "argument": i['media']['user']['username']
+                        }
+                    )
+                    self.actions.append(
+                        {
+                            "function": "unsave",
+                            "argument": i['media']['code']
+                        }
+                    )
 
     def animated_loading(self):
         chars = "/—\|"
