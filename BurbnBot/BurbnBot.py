@@ -101,6 +101,7 @@ class BurbnBot:
                 )
                 self.logger.info("Connected with Appium Server.")
                 self.driver.switch_to.context("NATIVE_APP")
+                self.driver.implicitly_wait(time_to_wait=30000)
                 self.touchaction = TouchAction(self.driver)
         except Exception as err:
             self.do_exception(err)
@@ -126,7 +127,7 @@ class BurbnBot:
         self.driver.find_element_by_xpath(elem_unfollow).click()
 
         sleep(2)
-        if self.check_element_exist("button_positive"):
+        if self.check_element_exist(ElementXpath.button_positive):
             self.driver.find_element_by_xpath(ElementXpath.button_positive).click()
             self.logger.info("If you change your mind, you'll have to request to follow @{} again.".format(user))
         try:
@@ -180,9 +181,9 @@ class BurbnBot:
         self.logger.info("That's all folks! Bye bye!")
         quit()
 
-    def check_element_exist(self, id):
+    def check_element_exist(self, xpath):
         try:
-            self.driver.find_element_by_id(id)
+            self.driver.find_element_by_xpath(xpath)
         except NoSuchElementException:
             return False
         return True
@@ -208,6 +209,8 @@ class BurbnBot:
     def refreshing(self):
         try:
             self.driver.get(url="https://www.instagram.com/{}/".format(self.username))
+            WebDriverWait(self.driver, 10).until(
+                expected_conditions.presence_of_element_located((By.XPATH, ElementXpath.tab_bar_home)))
             self.driver.find_element_by_xpath(ElementXpath.tab_bar_home).click()
             self.driver.find_element_by_xpath(ElementXpath.tab_bar_home).click()
             self.driver.find_element_by_xpath(ElementXpath.top_title).click()
@@ -230,14 +233,13 @@ class BurbnBot:
         count = 0
         amount = random.randint(2, 5)
         try:
-            stories_thumbnails = self.driver.find_elements_by_xpath(
-                "//*[@resource-id='com.instagram.android:id/outer_container']")
+            stories_thumbnails = self.driver.find_elements_by_xpath(ElementXpath.stories_thumbnails)
             stories_thumbnails[1].click()
             self.logger.info("Watching {} stories.".format(amount))
             while count < amount:
                 t = random.randint(5, 10)
                 sleep(t)
-                if self.check_element_exist(id="reel_viewer_texture_view"):
+                if self.check_element_exist(xpath=ElementXpath.reel_viewer_texture_view):
                     x1 = random.randint(750, 850)
                     y1 = random.randint(550, 650)
                     x2 = random.randint(200, 300)
@@ -359,8 +361,6 @@ class BurbnBot:
             if len(collection_today) > 0:
                 collection_today[0].click()
             else:
-                # https://www.instagram.com/p/B405BNnHtbO/?igshid=xj7un3d9cq06
-
                 self.driver.find_element_by_xpath(ElementXpath.save_to_collection_new_collection_button).click()
                 self.driver.find_element_by_xpath(ElementXpath.create_collection_edit_text).send_keys(strdate)
                 self.driver.find_element_by_xpath(ElementXpath.save_to_collection_action_button).click()
@@ -410,11 +410,11 @@ class BurbnBot:
 
     def watch_stories(self):
         try:
-            while self.check_element_exist(id="reel_viewer_texture_view"):
+            while self.check_element_exist(xpath=ElementXpath.reel_viewer_texture_view):
                 t = random.randint(5, 15)
                 self.logger.info("Sleeping for {} seconds.".format(t))
                 sleep(t)
-                if self.check_element_exist(id="reel_viewer_texture_view"):
+                if self.check_element_exist(xpath=ElementXpath.reel_viewer_texture_view):
                     self.logger.info("Tap")
                     self.driver.tap([(800, 600)], random.randint(3, 10))
         except Exception as err:
@@ -456,9 +456,8 @@ class BurbnBot:
 
     def get_type_post(self):
         r = "photo"
-        if self.check_element_exist(id="com.instagram.android:id/carousel_page_indicator"):
+        if self.check_element_exist(xpath=ElementXpath.carousel_page_indicator):
             r = "carousel"
-        elif self.check_element_exist("com.instagram.android:id/progress_bar"):
+        elif self.check_element_exist(xpath=ElementXpath.video_progress_bar):
             r = "video"
-
         return r
