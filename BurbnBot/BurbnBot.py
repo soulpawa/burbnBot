@@ -5,6 +5,9 @@ import logging
 import os
 import random
 import re
+import sys
+import threading
+import time
 import traceback
 from datetime import datetime
 from itertools import groupby
@@ -81,12 +84,13 @@ class BurbnBot:
             )
 
         except Exception as err:
-            self.do_exception(err)
+            self.treat_exception(err)
             self.end()
             pass
 
     def start_driver(self):
         try:
+            sys.stdout.flush()
             self.logger.info("Starting Appium service.")
             os.environ.setdefault(key="ANDROID_HOME", value=self.settings['android']['android_home'])
             self.appiumservice = AppiumService()
@@ -101,10 +105,12 @@ class BurbnBot:
                 )
                 self.logger.info("Connected with Appium Server.")
                 self.driver.switch_to.context("NATIVE_APP")
-                self.driver.implicitly_wait(time_to_wait=30000)
+                self.driver.implicitly_wait(time_to_wait=30)
                 self.touchaction = TouchAction(self.driver)
+            self.driver.get(url="https://www.instagram.com/{}/".format(self.settings['instagram']['username']))
+            sys.stdout.write('\r' + 'finished               \n')
         except Exception as err:
-            self.do_exception(err)
+            self.treat_exception(err)
 
     def stop_driver(self):
         self.driver.quit()
@@ -112,26 +118,23 @@ class BurbnBot:
         self.appiumservice.stop()
 
     def unfollow(self, user):
-        elem_following = "//*[@resource-id='com.instagram.android:id/profile_header_actions_top_row']//*[@text='Following']"
-        elem_unfollow = "//*[@resource-id='com.instagram.android:id/follow_sheet_unfollow_row']"
-        elem_follow = "//*[@class='android.widget.LinearLayout']//*[@text='Follow']"
-
         self.driver.get(url="https://www.instagram.com/{}/".format(user))
         self.logger.info("Unfollowing user {}, I hope they don't take it personal.".format(user))
 
         WebDriverWait(self.driver, 10).until(
-            expected_conditions.presence_of_element_located((By.XPATH, elem_following)))
-        self.driver.find_element_by_xpath(elem_following).click()
+            expected_conditions.presence_of_element_located((By.XPATH, ElementXpath.btn_Following)))
+        self.driver.find_element_by_xpath(ElementXpath.btn_Following).click()
 
-        WebDriverWait(self.driver, 10).until(expected_conditions.presence_of_element_located((By.XPATH, elem_unfollow)))
-        self.driver.find_element_by_xpath(elem_unfollow).click()
+        WebDriverWait(self.driver, 10).until(
+            expected_conditions.presence_of_element_located((By.XPATH, ElementXpath.btn_unfollow)))
+        self.driver.find_element_by_xpath(ElementXpath.btn_unfollow).click()
 
         sleep(2)
         if self.check_element_exist(ElementXpath.button_positive):
             self.driver.find_element_by_xpath(ElementXpath.button_positive).click()
             self.logger.info("If you change your mind, you'll have to request to follow @{} again.".format(user))
         try:
-            self.driver.find_element_by_xpath(elem_follow)
+            self.driver.find_element_by_xpath(ElementXpath.btn_follow)
         except NoSuchElementException:
             return False
         return True
@@ -152,7 +155,7 @@ class BurbnBot:
 
         non_followers = [x for x in following if x not in followers]
         self.logger.info("Setting command to unfollow users.")
-        for username in tqdm(non_followers[:amount], desc="Selecting user to unfollow."):
+        for username in tqdm(non_followers[:amount], desc="Selecting user to unfollow.", unit=" users"):
             self.actions.append(
                 {
                     "function": "unfollow",
@@ -169,8 +172,13 @@ class BurbnBot:
             r.append(str(p['media']['user']['username']))
         return r
 
-    def do_exception(self, err):
-        if hasattr(err, 'msg'):
+    def treat_exception(self, err):
+        if type(err).__name__ == 'WebDriverException':
+            self.start_android()
+            self.logger.error(msg=err.msg)
+            self.logger.error(msg=traceback.format_exc())
+            pass
+        elif hasattr(err, 'msg'):
             self.logger.error(msg=err.msg)
         self.logger.error(msg=traceback.format_exc())
         if isdebugging:
@@ -203,7 +211,7 @@ class BurbnBot:
                 self.driver.swipe(start_x, start_y, end_x, end_y, duration=random.randint(2500, 4000))
                 count += 1
         except Exception as err:
-            self.do_exception(err)
+            self.treat_exception(err)
             pass
 
     def refreshing(self):
@@ -224,7 +232,7 @@ class BurbnBot:
             end_y = el2.rect["y"] - 100
             self.driver.swipe(start_x, start_y, end_x, end_y, duration=random.randint(350, 400))
         except Exception as err:
-            self.do_exception(err)
+            self.treat_exception(err)
             pass
 
     def chimping_stories(self):
@@ -248,7 +256,7 @@ class BurbnBot:
                 count += 1
         except Exception as err:
             self.logger.info("Ops, something wrong while waching stories, sorry.")
-            self.do_exception(err)
+            self.treat_exception(err)
             pass
 
         self.driver.get(url="https://www.instagram.com/{}/".format(self.username))
@@ -269,14 +277,14 @@ class BurbnBot:
             counter = 0
             if amount > len(hashtag_medias):
                 amount = len(hashtag_medias)
-            hashtagpbar = tqdm(total=amount, desc="Selecting posts with the hashtag {}.".format(hashtag))
-            while counter < amount:
+
+            for i in tqdm(range(0, amount), desc="Selecting posts with the hashtag #{}.".format(hashtag),
+                          unit=" posts"):
                 if self.interact(hashtag_medias[counter]):
                     counter += 1
-                    hashtagpbar.update(counter)
         except Exception as err:
-            self.logger.info("Ops, something wrong while working with hashtag {}, sorry.".format(hashtag))
-            self.do_exception(err)
+            self.logger.info("Ops, something wrong while working with hashtag #{}, sorry.".format(hashtag))
+            self.treat_exception(err)
             pass
 
     def interact(self, id_medias):
@@ -309,7 +317,7 @@ class BurbnBot:
                     )
             return True
         except Exception as err:
-            self.do_exception(err)
+            self.treat_exception(err)
             return False
             pass
 
@@ -321,47 +329,58 @@ class BurbnBot:
         self.posts_to_follow = random.sample(range(0, len(likes_actions)),
                                              int(len(likes_actions) * (self.follow_percentage / 100)))
 
-        i = 0
-        amount = len(self.actions)
-        pbar = tqdm(total=amount, desc="Let's include some (not so real) actions.")
-        while i < amount:
-            self.actions.append({"function": "chimping_timeline"})
-            self.actions.append({"function": "chimping_stories"})
-            i += 1
-            pbar.update(i)
+        amount_actions = len(self.actions)
+        if not isdebugging():
+            for i in tqdm(range(1, amount_actions), desc="Let's include some (not so real) actions.", unit=" actions"):
+                self.actions.append({"function": "chimping_timeline"})
+                self.actions.append({"function": "chimping_stories"})
 
         random.shuffle(self.actions)
         self.actions = [i[0] for i in groupby(self.actions)]
 
-        self.start_driver()
-        self.driver.get(url="https://www.instagram.com/{}/".format(self.username))
-        for action in self.actions:
+        self.start_android()
+
+        for action in tqdm(self.actions, desc="Execution actions on the phone/emulator", unit=" actions"):
             try:
                 method_to_call = getattr(self, action['function'])
                 if "argument" in action:
                     method_to_call(action['argument'])
+                    sleep(random.randint(3, 10))
                 else:
                     method_to_call()
-                sleep(random.randint(3, 15))
             except Exception as err:
                 self.logger.info(
                     "Ops, something with the action {} ({}), sorry.".format(action['function'], action['argument']))
-                self.do_exception(err)
+                self.treat_exception(err)
                 pass
         self.stop_driver()
+
+    def start_android(self):
+        starting_appium = threading.Thread(name='process', target=self.start_driver)
+        starting_appium.start()
+        while starting_appium.isAlive():
+            self.animated_loading()
 
     def follow(self):
         try:
             button_save = self.driver.find_element_by_xpath(ElementXpath.row_feed_button_save)
             self.touchaction.long_press(button_save)
             self.touchaction.perform()
-            collection_names = self.driver.find_elements_by_xpath(ElementXpath.collection_name)
+
             strdate = datetime.now().strftime("%Y%m%d")
-            collection_today = [i for i in collection_names if i.text == strdate]
+
+            if self.check_element_exist(ElementXpath.create_collection_edit_text):
+                self.logger.info("Zero collection, let's create the first one.")
+                collection_today = []
+            else:
+                collection_names = self.driver.find_elements_by_xpath(ElementXpath.collection_name)
+                collection_today = [i for i in collection_names if i.text == strdate]
+
             if len(collection_today) > 0:
                 collection_today[0].click()
             else:
-                self.driver.find_element_by_xpath(ElementXpath.save_to_collection_new_collection_button).click()
+                if self.check_element_exist(ElementXpath.save_to_collection_new_collection_button):
+                    self.driver.find_element_by_xpath(ElementXpath.save_to_collection_new_collection_button).click()
                 self.driver.find_element_by_xpath(ElementXpath.create_collection_edit_text).send_keys(strdate)
                 self.driver.find_element_by_xpath(ElementXpath.save_to_collection_action_button).click()
 
@@ -373,7 +392,7 @@ class BurbnBot:
             self.logger.info("Following user {}.".format(user))
             return True
         except Exception as err:
-            self.do_exception(err)
+            self.treat_exception(err)
             return False
             pass
 
@@ -404,7 +423,7 @@ class BurbnBot:
         except Exception as err:
             self.logger.info("Ops, something wrong on try to like {}, sorry.".format(url))
             self.logger.error(err)
-            self.do_exception(err)
+            self.treat_exception(err)
             return False
             pass
 
@@ -419,7 +438,7 @@ class BurbnBot:
                     self.driver.tap([(800, 600)], random.randint(3, 10))
         except Exception as err:
             self.logger.info("Ops, something wrong while waching stories, sorry.")
-            self.do_exception(err)
+            self.treat_exception(err)
             pass
 
     def get_info(self):
@@ -429,19 +448,18 @@ class BurbnBot:
         self.get_type_post()
 
     def swipe_carousel(self):
-        if self.get_type_post() == "carousel":
-            try:
-                carousel_image = self.driver.find_element_by_xpath(ElementXpath.carousel_image)
-                match = re.search(r"(\d+).*?(\d+)", carousel_image.tag_name)
-                n = int(match.group(2))
-            except Exception as err:
-                n = 2  # if don't find the number of pictures work with only 2
-                pass
-            self.logger.info("Let's check all the {} images here.".format(n))
-            for x in range(n - 1):
-                self.driver.swipe(800, 600, 250, 600, random.randint(500, 1000))
-            for x in range(n - 1):
-                self.driver.swipe(300, 650, 800, 600, random.randint(500, 1000))
+        try:
+            carousel_image = self.driver.find_element_by_xpath(ElementXpath.carousel_image)
+            match = re.search(r"(\d+).*?(\d+)", carousel_image.tag_name)
+            n = int(match.group(2))
+        except Exception as err:
+            n = 2  # if don't find the number of pictures work with only 2
+            pass
+        self.logger.info("Let's check all the {} images here.".format(n))
+        for x in range(n - 1):
+            self.driver.swipe(800, 600, 250, 600, random.randint(500, 1000))
+        for x in range(n - 1):
+            self.driver.swipe(300, 650, 800, 600, random.randint(500, 1000))
 
     def watch_video(self):
         t = random.randint(5, 15)
@@ -449,15 +467,14 @@ class BurbnBot:
             clock = self.driver.find_element_by_id("com.android.systemui:id/status_bar_left_side")
             t = ((clock.text.split(':')[0] * 60) + clock.text.split(':')[1])
         except Exception as err:
-            self.do_exception(err)
+            self.treat_exception(err)
             pass
         self.logger.info('Watching video for {} seconds.'.format(t))
         sleep(t)
 
-    def get_type_post(self):
-        r = "photo"
-        if self.check_element_exist(xpath=ElementXpath.carousel_page_indicator):
-            r = "carousel"
-        elif self.check_element_exist(xpath=ElementXpath.video_progress_bar):
-            r = "video"
-        return r
+    def animated_loading(self):
+        chars = "/—\|"
+        for char in chars:
+            sys.stdout.write('\r' + 'loading service...' + char)
+            time.sleep(.1)
+            sys.stdout.flush()
