@@ -1,9 +1,11 @@
 import argparse
+import inspect
 import json
 import logging
 import os
 import random
 import re
+import traceback
 from datetime import datetime
 from itertools import groupby
 from time import sleep
@@ -21,6 +23,13 @@ from tqdm import tqdm
 from .ElementXpath import ElementXpath
 from .Predict import Predict
 from .Types import MediaType
+
+
+def isdebugging():
+    for frame in inspect.stack():
+        if frame[1].endswith("pydevd.py"):
+            return True
+    return False
 
 
 class BurbnBot:
@@ -43,8 +52,13 @@ class BurbnBot:
         args = parser.parse_args()
         self.settings = json.load(open(args.settings))
 
+        if isdebugging:
+            debuglevel = logging.ERROR
+        else:
+            debuglevel = logging.INFO
+
         logging.basicConfig(
-            level=logging.INFO,
+            level=debuglevel,
             format="%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s]  %(message)s",
             handlers=[
                 logging.FileHandler("{0}/{1}.log".format(self.logPath, self.settings['instagram']['username'])),
@@ -72,21 +86,24 @@ class BurbnBot:
             pass
 
     def start_driver(self):
-        self.logger.info("Starting Appium service.")
-        os.environ.setdefault(key="ANDROID_HOME", value=self.settings['android']['android_home'])
-        self.appiumservice = AppiumService()
-        self.appiumservice.stop()
-        self.appiumservice.start()
+        try:
+            self.logger.info("Starting Appium service.")
+            os.environ.setdefault(key="ANDROID_HOME", value=self.settings['android']['android_home'])
+            self.appiumservice = AppiumService()
+            self.appiumservice.stop()
+            self.appiumservice.start()
 
-        if self.appiumservice.is_running:
-            self.logger.info("Appium Server is running.")
-            self.driver = webdriver.Remote(
-                command_executor="http://localhost:4723/wd/hub",
-                desired_capabilities=self.settings['desired_caps']
-            )
-            self.logger.info("Connected with Appium Server.")
-            self.driver.switch_to.context("NATIVE_APP")
-            self.touchaction = TouchAction(self.driver)
+            if self.appiumservice.is_running:
+                self.logger.info("Appium Server is running.")
+                self.driver = webdriver.Remote(
+                    command_executor="http://localhost:4723/wd/hub",
+                    desired_capabilities=self.settings['desired_caps']
+                )
+                self.logger.info("Connected with Appium Server.")
+                self.driver.switch_to.context("NATIVE_APP")
+                self.touchaction = TouchAction(self.driver)
+        except Exception as err:
+            self.do_exception(err)
 
     def stop_driver(self):
         self.driver.quit()
@@ -134,7 +151,7 @@ class BurbnBot:
 
         non_followers = [x for x in following if x not in followers]
         self.logger.info("Setting command to unfollow users.")
-        for username in tqdm(non_followers[:amount]):
+        for username in tqdm(non_followers[:amount], desc="Selecting user to unfollow."):
             self.actions.append(
                 {
                     "function": "unfollow",
@@ -147,12 +164,16 @@ class BurbnBot:
         saveds = self.instabot.last_json['items']
         r = []
         self.logger.info("Getting owner of saved posts")
-        for p in tqdm(saveds):
+        for p in saveds:
             r.append(str(p['media']['user']['username']))
         return r
 
     def do_exception(self, err):
-        self.logger.error(err)
+        if hasattr(err, 'msg'):
+            self.logger.error(msg=err.msg)
+        self.logger.error(msg=traceback.format_exc())
+        if isdebugging:
+            breakpoint()
 
     def end(self):
         self.appiumservice.stop()
@@ -181,6 +202,7 @@ class BurbnBot:
                 self.driver.swipe(start_x, start_y, end_x, end_y, duration=random.randint(2500, 4000))
                 count += 1
         except Exception as err:
+            self.do_exception(err)
             pass
 
     def refreshing(self):
@@ -199,6 +221,7 @@ class BurbnBot:
             end_y = el2.rect["y"] - 100
             self.driver.swipe(start_x, start_y, end_x, end_y, duration=random.randint(350, 400))
         except Exception as err:
+            self.do_exception(err)
             pass
 
     def chimping_stories(self):
@@ -244,7 +267,7 @@ class BurbnBot:
             counter = 0
             if amount > len(hashtag_medias):
                 amount = len(hashtag_medias)
-            hashtagpbar = tqdm(total=amount, desc="Liking posts with the hashtag {}.".format(hashtag))
+            hashtagpbar = tqdm(total=amount, desc="Selecting posts with the hashtag {}.".format(hashtag))
             while counter < amount:
                 if self.interact(hashtag_medias[counter]):
                     counter += 1
@@ -284,6 +307,7 @@ class BurbnBot:
                     )
             return True
         except Exception as err:
+            self.do_exception(err)
             return False
             pass
 
@@ -298,11 +322,11 @@ class BurbnBot:
         i = 0
         amount = len(self.actions)
         pbar = tqdm(total=amount, desc="Let's include some (not so real) actions.")
-        # while i < amount:
-        #     self.actions.append({"function": "chimping_timeline"})
-        #     self.actions.append({"function": "chimping_stories"})
-        #     i += 1
-        #     pbar.update(i)
+        while i < amount:
+            self.actions.append({"function": "chimping_timeline"})
+            self.actions.append({"function": "chimping_stories"})
+            i += 1
+            pbar.update(i)
 
         random.shuffle(self.actions)
         self.actions = [i[0] for i in groupby(self.actions)]
@@ -342,11 +366,14 @@ class BurbnBot:
                 self.driver.find_element_by_xpath(ElementXpath.save_to_collection_action_button).click()
 
             self.driver.find_element_by_xpath(ElementXpath.row_feed_photo_profile_name).click()
+            WebDriverWait(self.driver, 10).until(
+                expected_conditions.presence_of_element_located((By.XPATH, ElementXpath.btn_follow)))
             self.driver.find_element_by_xpath(ElementXpath.btn_follow).click()
             user = self.driver.find_element_by_xpath(ElementXpath.action_bar_textview_title).text
             self.logger.info("Following user {}.".format(user))
             return True
         except Exception as err:
+            self.do_exception(err)
             return False
             pass
 
@@ -377,6 +404,7 @@ class BurbnBot:
         except Exception as err:
             self.logger.info("Ops, something wrong on try to like {}, sorry.".format(url))
             self.logger.error(err)
+            self.do_exception(err)
             return False
             pass
 
@@ -391,7 +419,7 @@ class BurbnBot:
                     self.driver.tap([(800, 600)], random.randint(3, 10))
         except Exception as err:
             self.logger.info("Ops, something wrong while waching stories, sorry.")
-            self.logger.error(err)
+            self.do_exception(err)
             pass
 
     def get_info(self):
@@ -421,6 +449,7 @@ class BurbnBot:
             clock = self.driver.find_element_by_id("com.android.systemui:id/status_bar_left_side")
             t = ((clock.text.split(':')[0] * 60) + clock.text.split(':')[1])
         except Exception as err:
+            self.do_exception(err)
             pass
         self.logger.info('Watching video for {} seconds.'.format(t))
         sleep(t)

@@ -1,3 +1,5 @@
+import traceback
+
 from clarifai.rest import ClarifaiApp
 
 
@@ -23,8 +25,11 @@ class Predict:
                 else:
                     return any((tag in concepts for tag in tags))
         except Exception as err:
-            self.logger.info("Ops, something wrong on clarifai predict, sorry.")
-            self.logger.error(err)
+            logger.info("Ops, something wrong on clarifai predict, sorry.")
+            logger.error(msg=err.msg)
+            logger.error(msg=traceback.format_exc())
+            breakpoint()
+            return False
             pass
 
     def get(self, url, is_video=False):
@@ -42,6 +47,10 @@ class Predict:
             r = list(dict.fromkeys(r))
 
         except Exception as e:
+            if hasattr(e, 'error_code'):
+                if e.error_code == 11006:
+                    print(e.error_desc)
+                    exit()
             return False
             pass
         return r
