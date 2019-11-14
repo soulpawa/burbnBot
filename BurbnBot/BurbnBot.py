@@ -298,11 +298,11 @@ class BurbnBot:
         i = 0
         amount = len(self.actions)
         pbar = tqdm(total=amount, desc="Let's include some (not so real) actions.")
-        while i < amount:
-            self.actions.append({"function": "chimping_timeline"})
-            self.actions.append({"function": "chimping_stories"})
-            i += 1
-            pbar.update(i)
+        # while i < amount:
+        #     self.actions.append({"function": "chimping_timeline"})
+        #     self.actions.append({"function": "chimping_stories"})
+        #     i += 1
+        #     pbar.update(i)
 
         random.shuffle(self.actions)
         self.actions = [i[0] for i in groupby(self.actions)]
