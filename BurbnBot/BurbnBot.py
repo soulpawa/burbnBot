@@ -18,9 +18,6 @@ from appium import webdriver
 from appium.webdriver.appium_service import AppiumService
 from appium.webdriver.common.touch_action import TouchAction
 from selenium.common.exceptions import NoSuchElementException
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support import expected_conditions
-from selenium.webdriver.support.ui import WebDriverWait
 from tqdm import tqdm
 
 from .ElementXpath import ElementXpath
@@ -44,7 +41,7 @@ class BurbnBot:
     touchaction = None
     settings = {}
     actions = []
-    follow_percentage = 50
+    follow_percentage = 0
     amount_liked = 0
     amount_followed = 0
 
@@ -105,9 +102,10 @@ class BurbnBot:
                 )
                 self.logger.info("Connected with Appium Server.")
                 self.driver.switch_to.context("NATIVE_APP")
-                self.driver.implicitly_wait(time_to_wait=30)
+                self.driver.implicitly_wait(time_to_wait=10)
                 self.touchaction = TouchAction(self.driver)
             self.driver.get(url="https://www.instagram.com/{}/".format(self.settings['instagram']['username']))
+            self.driver.get(url="https://www.instagram.com/")
             sys.stdout.write('\r' + 'finished               \n')
         except Exception as err:
             self.treat_exception(err)
@@ -133,16 +131,9 @@ class BurbnBot:
             self.logger.info("You aren't following {}.".format(user))
             return False
         self.logger.info("Unfollowing user {}, I hope they don't take it personal.".format(user))
-
-        WebDriverWait(self.driver, 10).until(
-            expected_conditions.presence_of_element_located((By.XPATH, ElementXpath.btn_Following)))
         self.driver.find_element_by_xpath(ElementXpath.btn_Following).click()
-
-        WebDriverWait(self.driver, 10).until(
-            expected_conditions.presence_of_element_located((By.XPATH, ElementXpath.btn_unfollow)))
         self.driver.find_element_by_xpath(ElementXpath.btn_unfollow).click()
 
-        sleep(2)
         if self.check_element_exist(ElementXpath.button_positive):
             self.driver.find_element_by_xpath(ElementXpath.button_positive).click()
             self.logger.info("If you change your mind, you'll have to request to follow @{} again.".format(user))
@@ -194,8 +185,8 @@ class BurbnBot:
         elif hasattr(err, 'msg'):
             self.logger.error(msg=err.msg)
         self.logger.error(msg=traceback.format_exc())
-        if isdebugging:
-            breakpoint()
+        # if isdebugging:
+        #     breakpoint()
 
     def end(self):
         self.appiumservice.stop()
@@ -229,9 +220,7 @@ class BurbnBot:
 
     def refreshing(self):
         try:
-            self.driver.get(url="https://www.instagram.com/{}/".format(self.username))
-            WebDriverWait(self.driver, 10).until(
-                expected_conditions.presence_of_element_located((By.XPATH, ElementXpath.tab_bar_home)))
+            self.driver.get(url="https://www.instagram.com/")
             self.driver.find_element_by_xpath(ElementXpath.tab_bar_home).click()
             self.driver.find_element_by_xpath(ElementXpath.tab_bar_home).click()
             self.driver.find_element_by_xpath(ElementXpath.top_title).click()
@@ -272,7 +261,8 @@ class BurbnBot:
             self.treat_exception(err)
             pass
 
-        self.driver.get(url="https://www.instagram.com/{}/".format(self.username))
+        self.driver.get(url="https://www.instagram.com/{}/".format(self.settings['instagram']['username']))
+        self.driver.get(url="https://www.instagram.com/")
 
     def interact_by_location(self, amount: int = 15, location_id: int = ""):
         self.instabot.api.get_location_feed(location_id=213819997, max_id=9999)
@@ -339,10 +329,12 @@ class BurbnBot:
 
     def do_actions(self):
         likes_actions = [i for i in self.actions if i["function"] == "like"]
-        self.posts_to_follow = random.sample(range(0, len(likes_actions)),
-                                             int(len(likes_actions) * (self.follow_percentage / 100)))
+        self.posts_to_follow = []
+        if self.follow_percentage > 0:
+            self.posts_to_follow = random.sample(range(0, len(likes_actions)),
+                                                 int(len(likes_actions) * (self.follow_percentage / 100)))
 
-        amount_actions = len(self.actions)
+        amount_actions = int(len(self.actions) / 2)
         if not isdebugging():
             for i in tqdm(range(1, amount_actions), desc="Let's include some (not so real) actions.", unit=" actions"):
                 self.actions.append({"function": "chimping_timeline"})
@@ -375,6 +367,22 @@ class BurbnBot:
             self.animated_loading()
 
     def follow(self):
+        if self.save_in_collection():
+            try:
+                self.driver.find_element_by_xpath(ElementXpath.btn_follow).click()
+                user = self.driver.find_element_by_xpath(ElementXpath.action_bar_textview_title).text
+                self.logger.info("Following user {}.".format(user))
+                self.amount_followed += 1
+                print(self.amount_followed)
+                return True
+            except Exception as err:
+                self.treat_exception(err)
+                return False
+                pass
+        else:
+            return False
+
+    def save_in_collection(self):
         try:
             button_save = self.driver.find_element_by_xpath(ElementXpath.row_feed_button_save)
             self.touchaction.long_press(button_save)
@@ -398,24 +406,17 @@ class BurbnBot:
                 self.driver.find_element_by_xpath(ElementXpath.save_to_collection_action_button).click()
 
             self.driver.find_element_by_xpath(ElementXpath.row_feed_photo_profile_name).click()
-            WebDriverWait(self.driver, 10).until(
-                expected_conditions.presence_of_element_located((By.XPATH, ElementXpath.btn_follow)))
-            self.driver.find_element_by_xpath(ElementXpath.btn_follow).click()
-            user = self.driver.find_element_by_xpath(ElementXpath.action_bar_textview_title).text
-            self.logger.info("Following user {}.".format(user))
             return True
-        except Exception as err:
-            self.treat_exception(err)
+        except Exception as e:
+            self.logger.error("Post not saved!")
+            self.treat_exception(e)
             return False
-            pass
 
     def like(self, param):
         url = param["url"]
         media_type = param["media_type"]
         self.driver.get(url=url)
         try:
-            WebDriverWait(self.driver, 10).until(expected_conditions.presence_of_element_located(
-                (By.XPATH, ElementXpath.row_feed_button_like)))
             e = self.driver.find_element_by_xpath(ElementXpath.row_feed_button_like)
             if e.tag_name == "Liked":
                 self.logger.info("Ops, you already like this one, sorry.")
@@ -428,7 +429,7 @@ class BurbnBot:
                     self.swipe_carousel()
 
                 e.click()
-                sleep(random.randint(1, 3))
+                # sleep(random.randint(1, 3))
                 self.logger.info("Image {} Liked.".format(url))
                 if self.amount_liked in self.posts_to_follow:
                     self.follow()
@@ -443,7 +444,7 @@ class BurbnBot:
     def watch_stories(self):
         try:
             while self.check_element_exist(xpath=ElementXpath.reel_viewer_texture_view):
-                t = random.randint(5, 15)
+                t = random.randint(2, 10)
                 self.logger.info("Sleeping for {} seconds.".format(t))
                 sleep(t)
                 if self.check_element_exist(xpath=ElementXpath.reel_viewer_texture_view):
@@ -476,13 +477,6 @@ class BurbnBot:
 
     def watch_video(self):
         t = random.randint(5, 15)
-        try:
-            clock = self.driver.find_element_by_id("com.android.systemui:id/status_bar_left_side")
-            t = ((clock.text.split(':')[0] * 60) + clock.text.split(':')[1])
-        except Exception as err:
-            self.treat_exception(err)
-            pass
-        self.logger.info('Watching video for {} seconds.'.format(t))
         sleep(t)
 
     def get_collections(self):

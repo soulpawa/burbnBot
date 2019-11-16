@@ -53,7 +53,7 @@ class Predict:
         except Exception as e:
             if hasattr(e, 'error_code'):
                 if e.error_code == 11006:
-                    print(e.error_desc)
+                    print("Clarifai Error: {}".format(e.error_desc))
                     exit()
             return False
             pass
