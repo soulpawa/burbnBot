@@ -33,17 +33,19 @@ def isdebugging():
 
 
 class BurbnBot:
-    logPath = "log/"
-    username = ""
-    driver = ""
-    instabot = None
-    appiumservice = None
-    touchaction = None
-    settings = {}
     actions = []
-    follow_percentage = 0
-    amount_liked = 0
-    amount_followed = 0
+    amount_followed: int = 0
+    amount_liked: int = 0
+    appiumservice = None
+    driver = ""
+    follow_percentage: int = 0
+    instabot = None
+    logPath: str = "log/"
+    logger = ""
+    posts_to_follow = ""
+    predict = ""
+    settings = {}
+    touchaction = None
 
     def __init__(self, configfile: str = None):
         self.configfile = configfile
@@ -238,7 +240,6 @@ class BurbnBot:
             pass
 
     def chimping_stories(self):
-
         self.refreshing()
         count = 0
         amount = random.randint(2, 5)
