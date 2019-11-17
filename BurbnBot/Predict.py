@@ -1,26 +1,25 @@
-import inspect
-import traceback
-
 from clarifai.rest import ClarifaiApp
 
 
 class Predict:
     app = None
     model = None
+    logger = None
 
-    def __init__(self, api_key: str = None):
+    def __init__(self, api_key: str = None, logger=None):
         self.app = ClarifaiApp(api_key=api_key)
         self.model = self.app.public_models.general_model
+        self.logger = logger
 
-    def check(self, logger, url: str = None, tags: list = [], tags_skip: list = [], is_video: bool = False):
-        for frame in inspect.stack():
-            if frame[1].endswith("pydevd.py"):
-                return True
+    def check(self, url: str = None, tags=[], tags_skip=[], is_video: bool = False):
+        # for frame in inspect.stack():
+        #     if frame[1].endswith("pydevd.py"):
+        #         return True
         try:
             concepts = self.get(url=url, is_video=is_video)
             if len(tags_skip) > 0:
                 if any((tag in concepts for tag in tags_skip)):
-                    logger.info(
+                    self.logger.debug(
                         'Not interacting, image contains concept(s): "{}".'.format(
                             ", ".join(list(set(concepts) & set(tags_skip)))
                         )
@@ -29,9 +28,7 @@ class Predict:
                 else:
                     return any((tag in concepts for tag in tags))
         except Exception as err:
-            logger.info("Ops, something wrong on clarifai predict, sorry.")
-            logger.error(msg=err.msg)
-            logger.error(msg=traceback.format_exc())
+            self.logger.warning("Ops, something wrong on clarifai predict, sorry.")
             breakpoint()
             return False
             pass
@@ -53,8 +50,9 @@ class Predict:
         except Exception as e:
             if hasattr(e, 'error_code'):
                 if e.error_code == 11006:
-                    print("Clarifai Error: {}".format(e.error_desc))
+                    self.logger.critical("Clarifai Error: {}".format(e.error_desc))
                     exit()
             return False
             pass
+
         return r

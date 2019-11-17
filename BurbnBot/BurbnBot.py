@@ -1,14 +1,12 @@
 import argparse
 import inspect
 import json
-import logging
 import os
 import random
 import re
 import sys
 import threading
 import time
-import traceback
 from datetime import datetime
 from itertools import groupby
 from time import sleep
@@ -17,6 +15,7 @@ import instabot
 from appium import webdriver
 from appium.webdriver.appium_service import AppiumService
 from appium.webdriver.common.touch_action import TouchAction
+from loguru import logger
 from selenium.common.exceptions import NoSuchElementException
 from tqdm import tqdm
 
@@ -54,27 +53,18 @@ class BurbnBot:
         args = parser.parse_args()
         self.settings = json.load(open(args.settings))
 
-        if isdebugging:
-            debuglevel = logging.ERROR
-        else:
-            debuglevel = logging.INFO
-
-        logging.basicConfig(
-            level=debuglevel,
-            format="%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s]  %(message)s",
-            handlers=[
-                logging.FileHandler("{0}/{1}.log".format(self.logPath, self.settings['instagram']['username'])),
-                logging.StreamHandler()
-            ])
-
-        self.logger = logging.getLogger()
+        self.logger = logger
+        self.logger.add("log/{}.log".format(self.settings['instagram']['username']), backtrace=True, diagnose=True,
+                        level="WARNING")
 
         try:
             self.logger.info("Lets do it!.")
 
-            self.predict = Predict(api_key=self.settings['clarifai']['api_key'])
+            self.predict = Predict(api_key=self.settings['clarifai']['api_key'], logger=self.logger)
 
             self.instabot = instabot.Bot(base_path="InstaBot/")
+            self.instabot.logger = self.logger
+            self.instabot.api.logger = self.logger
 
             self.instabot.login(
                 username=self.settings['instagram']['username'],
@@ -110,6 +100,7 @@ class BurbnBot:
             self.driver.get(url="https://www.instagram.com/")
             sys.stdout.write('\r' + 'finished               \n')
         except Exception as err:
+            self.logger.critical("Appium not started")
             self.treat_exception(err)
 
     def stop_driver(self):
@@ -179,16 +170,9 @@ class BurbnBot:
         return r
 
     def treat_exception(self, err):
-        if type(err).__name__ == 'WebDriverException':
-            self.start_android()
-            self.logger.error(msg=err.msg)
-            self.logger.error(msg=traceback.format_exc())
-            pass
-        elif hasattr(err, 'msg'):
-            self.logger.error(msg=err.msg)
-        self.logger.error(msg=traceback.format_exc())
-        # if isdebugging:
-        #     breakpoint()
+        self.logger.exception(err)
+        if isdebugging:
+            breakpoint()
 
     def end(self):
         self.appiumservice.stop()
@@ -258,7 +242,7 @@ class BurbnBot:
                     self.driver.swipe(x1, y1, x2, y2, random.randint(500, 1000))
                 count += 1
         except Exception as err:
-            self.logger.info("Ops, something wrong while waching stories, sorry.")
+            self.logger.warning("Ops, something wrong while waching stories, sorry.")
             self.treat_exception(err)
             pass
 
@@ -275,55 +259,104 @@ class BurbnBot:
             self.interact(last_json['items'][counter]['id'])
             counter += 1
 
-    def interact_by_hashtag(self, amount: int = 15, hashtag: str = None):
-        try:
-            hashtag_medias = self.instabot.get_hashtag_medias(hashtag=hashtag, filtration=False)
-            counter = 0
-            if amount > len(hashtag_medias):
-                amount = len(hashtag_medias)
-
-            for i in tqdm(range(0, amount), desc="Selecting posts with the hashtag #{}.".format(hashtag),
-                          unit=" posts"):
-                if self.interact(hashtag_medias[counter]):
-                    counter += 1
-        except Exception as err:
-            self.logger.info("Ops, something wrong while working with hashtag #{}, sorry.".format(hashtag))
-            self.treat_exception(err)
-            pass
-
-    def interact(self, id_medias):
-        try:
-            post_info = self.instabot.get_media_info(media_id=id_medias)
-
-            if post_info[0]['media_type'] == MediaType.PHOTO:
-                url_image = post_info[0]['image_versions2']['candidates'][0]['url']
-            elif post_info[0]['media_type'] == MediaType.CAROUSEL:
-                url_image = post_info[0]['carousel_media'][0]['image_versions2']['candidates'][0]['url']
-            else:
-                url_image = post_info[0]['video_versions'][0]['url']
-
-            p = "https://www.instagram.com/p/{}/".format(post_info[0]['code'])
-            self.logger.info("Checking post {}.".format(p))
-
-            if not post_info[0]['has_liked']:
-                if self.predict.check(self.logger, url=url_image,
-                                      tags=self.settings['clarifai']['concepts'],
-                                      tags_skip=self.settings['clarifai']['concepts_skip'],
-                                      is_video=(post_info[0]['media_type'] == 2)):
-                    self.actions.append(
-                        {
-                            "function": "like",
-                            "argument": {
-                                "url": p,
-                                "media_type": post_info[0]['media_type']
-                            }
-                        }
-                    )
-            return True
-        except Exception as err:
-            self.treat_exception(err)
+    def check_item(self, item, concepts=[], concepts_skip=[], max_likes=1000, min_likes=0):
+        if not item['like_count'] in range(min_likes, max_likes):
             return False
+        if item['has_liked']:
+            return False
+
+        if isinstance(concepts, list) and isinstance(concepts_skip, list):
+            if item['media_type'] == MediaType.PHOTO:
+                url_image = item['image_versions2']['candidates'][0]['url']
+            elif item['media_type'] == MediaType.CAROUSEL:
+                url_image = item['carousel_media'][0]['image_versions2']['candidates'][0]['url']
+            else:
+                url_image = item['video_versions'][0]['url']
+            predict = self.predict.check(url=url_image, tags=concepts, tags_skip=concepts_skip,
+                                         is_video=item['media_type'] == 2)
+        else:
+            predict = True
+
+        return predict
+
+    def interact_by_hashtag(self, amount: int = 15,
+                            hashtag: str = "",
+                            ranked_items: bool = True,
+                            concepts=[],
+                            concepts_skip=[],
+                            max_likes=100,
+                            min_likes=0):
+        try:
+            items = []
+            next_max_id = ""
+            while self.instabot.api.get_hashtag_feed(hashtag, max_id=next_max_id):
+                last_json = self.instabot.api.last_json
+                next_max_id = last_json['next_max_id']
+                if ranked_items:
+                    if "ranked_items" in last_json:
+                        items = items + last_json['ranked_items']
+                items = items + last_json['items']
+                items = [i for i in items[0:amount] if self.check_item(item=i,
+                                                                       concepts=concepts,
+                                                                       concepts_skip=concepts_skip,
+                                                                       max_likes=max_likes,
+                                                                       min_likes=min_likes)]
+                if amount == len(items[0:amount]):
+                    items = items[0:amount]
+                    break
+
+            return [item for item in items if self.add_action(item, "like")]
+        except Exception as err:
+            self.logger.warning("Ops, something wrong while working with hashtag #{}, sorry.".format(hashtag))
+            self.treat_exception(err)
             pass
+
+    def interact_by_location(self, amount: int = 15,
+                             location_id: int = "",
+                             ranked_items: bool = True,
+                             concepts=[],
+                             concepts_skip=[],
+                             max_likes=100,
+                             min_likes=0):
+        try:
+            items = []
+            next_max_id = ""
+            while self.instabot.api.get_location_feed(location_id, max_id=next_max_id):
+                last_json = self.instabot.api.last_json
+                next_max_id = last_json['next_max_id']
+                if ranked_items:
+                    if "ranked_items" in last_json:
+                        items = items + last_json['ranked_items']
+                items = items + last_json['items']
+                items = [i for i in items if self.check_item(item=i,
+                                                             concepts=concepts,
+                                                             concepts_skip=concepts_skip,
+                                                             max_likes=max_likes,
+                                                             min_likes=min_likes)]
+                if amount == len(items[0:amount]):
+                    items = items[0:amount]
+                    break
+
+            return [item for item in items if self.add_action(item, "like")]
+        except Exception as err:
+            self.logger.warning("Ops, something wrong while working with location {}, sorry.".format(location_id))
+            self.treat_exception(err)
+            pass
+
+    def add_action(self, item, function):
+        try:
+            self.actions.append(
+                {
+                    "function": function,
+                    "argument": {
+                        "url": "https://www.instagram.com/p/{}/".format(item["code"]),
+                        "media_type": item['media_type']
+                    }
+                }
+            )
+            return True
+        except:
+            return False
 
     def set_do_follow(self, follow_percentage: int = 0):
         self.follow_percentage = follow_percentage
@@ -355,7 +388,7 @@ class BurbnBot:
                 else:
                     method_to_call()
             except Exception as err:
-                self.logger.info(
+                self.logger.warning(
                     "Ops, something with the action {} ({}), sorry.".format(action['function'], action['argument']))
                 self.treat_exception(err)
                 pass
@@ -409,7 +442,7 @@ class BurbnBot:
             self.driver.find_element_by_xpath(ElementXpath.row_feed_photo_profile_name).click()
             return True
         except Exception as e:
-            self.logger.error("Post not saved!")
+            self.logger.warning("Post not saved!")
             self.treat_exception(e)
             return False
 
@@ -425,7 +458,7 @@ class BurbnBot:
             else:
 
                 if media_type == MediaType.VIDEO:
-                    self.watch_video()
+                    self.wait_random()
                 elif media_type == MediaType.CAROUSEL:
                     self.swipe_carousel()
 
@@ -436,7 +469,7 @@ class BurbnBot:
                     self.follow()
                 return True
         except Exception as err:
-            self.logger.info("Ops, something wrong on try to like {}, sorry.".format(url))
+            self.logger.warning("Ops, something wrong on try to like {}, sorry.".format(url))
             self.logger.error(err)
             self.treat_exception(err)
             return False
@@ -452,7 +485,7 @@ class BurbnBot:
                     self.logger.info("Tap")
                     self.driver.tap([(800, 600)], random.randint(3, 10))
         except Exception as err:
-            self.logger.info("Ops, something wrong while waching stories, sorry.")
+            self.logger.warning("Ops, something wrong while waching stories, sorry.")
             self.treat_exception(err)
             pass
 
@@ -467,16 +500,17 @@ class BurbnBot:
             carousel_image = self.driver.find_element_by_xpath(ElementXpath.carousel_image)
             match = re.search(r"(\d+).*?(\d+)", carousel_image.tag_name)
             n = int(match.group(2))
-        except Exception as err:
+        except NoSuchElementException as err:
             n = 2  # if don't find the number of pictures work with only 2
             pass
-        self.logger.info("Let's check all the {} images here.".format(n))
+        self.logger.warning("Let's check all the {} images here.".format(n))
         for x in range(n - 1):
             self.driver.swipe(800, 600, 250, 600, random.randint(500, 1000))
         for x in range(n - 1):
             self.driver.swipe(300, 650, 800, 600, random.randint(500, 1000))
 
-    def watch_video(self):
+    @staticmethod
+    def wait_random():
         t = random.randint(5, 15)
         sleep(t)
 
@@ -507,7 +541,8 @@ class BurbnBot:
                         }
                     )
 
-    def animated_loading(self):
+    @staticmethod
+    def animated_loading():
         chars = "/—\|"
         for char in chars:
             sys.stdout.write('\r' + 'loading service...' + char)
